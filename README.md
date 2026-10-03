@@ -1,8 +1,27 @@
 # 歪歪网易云唱片 CloudDisc
 
+[![Release](https://img.shields.io/github/v/release/yeyang34/clouddisc)](https://github.com/yeyang34/clouddisc/releases/latest)
+[![Download](https://img.shields.io/badge/download-latest%20jar-2ea44f)](https://github.com/yeyang34/clouddisc/releases/latest)
+![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-blue)
+![Fabric](https://img.shields.io/badge/Fabric-client--only-orange)
+
 > **歪歪网易云唱片mod——忠于原版，高于原版**
 >
 > 让 Minecraft 自己唱你的网易云：全程客户端，全图同步。中途进场也不掉拍。
+
+---
+
+## 下载与安装（给玩家）
+
+1. 到 **[Releases](https://github.com/yeyang34/clouddisc/releases/latest)** 下载最新的 `clouddisc-x.y.z.jar`
+2. 丢进 `.minecraft/mods/`（需要 **Fabric 1.20.1** 与 **Fabric API**）
+3. 用铁砧把任意唱片改名为 **`@歌曲id`**（例如 `@188204`），放进唱片机即可播放
+4. 想放 VIP 曲目需要自建解析服务 —— 游戏内按 `K` 打开配置界面 → 第 3 节「使用教程」有完整说明
+
+> 更新时**先删掉旧 jar 再放新的**（同时留两个同 id 的 jar 会让 Fabric 拒绝启动）。
+> 服务器侧不需要装；若服主愿意把同一个 jar 放进服务端 `mods/`，跨公网同步会更省心（不装也能用）。
+
+---
 
 把**被铁砧改过名的唱片**放进唱片机，就会播放网易云的歌；并且**所有装了本 Mod 的玩家听到同一进度**（含中途进服、从远处走近）。
 
