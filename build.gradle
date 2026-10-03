@@ -1,0 +1,51 @@
+plugins {
+	id 'fabric-loom' version '1.6.12'
+	id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// Loom 会自动加入 Minecraft / Fabric 所需的仓库，这里补第三方
+	maven { name = 'Shedaniel'; url = 'https://maven.shedaniel.me/' }
+	maven { name = 'TerraformersMC'; url = 'https://maven.terraformersmc.com/releases/' }
+	mavenCentral()
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// ModMenu 的模组列表入口（仅编译期需要；运行期没装 ModMenu 也不会加载那个类）
+	modCompileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+
+	// MP3 解码（LGPL-2.1，见 THIRD-PARTY.md）。
+	// 用 Loom 的 include 打成嵌套 jar（META-INF/jars/），不打进主 classpath，
+	// 这样满足 LGPL "可替换"的要求，也不必把本 Mod 变成 LGPL。
+	include(implementation("com.googlecode.soundlibs:jlayer:1.0.1.4"))
+}
+
+processResources {
+	inputs.property "version", project.version
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 17
+	it.options.encoding = "UTF-8"
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+	withSourcesJar()
+}

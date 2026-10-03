@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "clouddisc",
+	"version": "${version}",
+	"name": "歪歪网易云唱片 CloudDisc",
+	"description": "歪歪网易云唱片mod——忠于原版，高于原版。\n让 Minecraft 自己唱你的网易云：全程客户端，全图同步。\n把被铁砧改名的唱片放进唱片机，就会播放网易云的歌，并且所有装了本 Mod 的玩家听到同一进度（含中途进服/从远处走近）。声音仍走 Minecraft 自己的音频引擎，定位衰减、音量滑块、暂停与原版停止逻辑全部沿用。",
+	"authors": [
+		"Me!"
+	],
+	"contact": {},
+	"license": "MIT",
+	"icon": "assets/clouddisc/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.clouddisc.server.CloudDiscServer"
+		],
+		"client": [
+			"dev.clouddisc.CloudDiscClient"
+		],
+		"modmenu": [
+			"dev.clouddisc.gui.ModMenuIntegration"
+		]
+	},
+	"mixins": [
+		{
+			"config": "clouddisc.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.16.10",
+		"minecraft": "~1.20.1",
+		"java": ">=17",
+		"fabric-api": "*"
+	},
+	"recommends": {
+		"modmenu": "*"
+	}
+}

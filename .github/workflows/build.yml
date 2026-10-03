@@ -1,0 +1,51 @@
+name: build
+
+# 推送到 main 或打 tag 时自动构建。
+# 打 tag（例如 v0.7.0）时会自动创建一个 Release，把 jar 挂上去 ——
+# 这样"更新"就是把 Release 链接发给朋友，不用再手动传文件。
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: 构建
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build --no-daemon
+
+      - name: 上传构建产物（每次推送都可下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: clouddisc-jar
+          path: |
+            build/libs/clouddisc-*.jar
+            !build/libs/*-sources.jar
+          if-no-files-found: error
+
+      - name: 打 tag 时创建 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/libs/clouddisc-*.jar
+            !build/libs/*-sources.jar
+          generate_release_notes: true

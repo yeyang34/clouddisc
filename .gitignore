@@ -1,0 +1,25 @@
+# Gradle / 构建产物
+build/
+.gradle/
+out/
+run/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# 日志与临时文件
+*.log
+*.part
+logs/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 本地测试用（每个人的游戏目录不同，不进仓库）
+clouddisc-music/
+config/
