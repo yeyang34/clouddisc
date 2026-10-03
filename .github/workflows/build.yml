@@ -38,7 +38,9 @@ jobs:
           name: clouddisc-jar
           path: |
             build/libs/clouddisc-*.jar
+            jukeboxlib/build/libs/clouddisc-jukeboxlib-*.jar
             !build/libs/*-sources.jar
+            !jukeboxlib/build/libs/*-sources.jar
           if-no-files-found: error
 
       - name: 打 tag 时创建 Release
@@ -47,5 +49,7 @@ jobs:
         with:
           files: |
             build/libs/clouddisc-*.jar
+            jukeboxlib/build/libs/clouddisc-jukeboxlib-*.jar
             !build/libs/*-sources.jar
+            !jukeboxlib/build/libs/*-sources.jar
           generate_release_notes: true
