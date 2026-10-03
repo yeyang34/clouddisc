@@ -6,6 +6,23 @@
 
 ---
 
+## 0.9.6 / 0.9.5 / 0.9.4
+
+**补上"解析阶段无人应答"的空窗 + 令牌可视化**
+
+- **根因**（0.9.4）：`sessions` 是在**解析完成后的回调**里才 `put` 的，而解析（查真名 + 换 URL）要 1~3 秒。
+  这段窗口内收到 `T_QUERY` 时 `sessions.get(key) == null` → 不回话 →
+  询问方在 `HOLD_TICKS_UNCLAIMED`（原为 6 刻 = 300ms）后触发 `fallbackVanilla` → 听到原版声。
+  0.6.6 加的"未排定开始刻就回 CLAIM"覆盖不到这一段，因为那时**会话对象还不存在**。
+- **修法**：把 `pending`（右键即创建、原先在 1010 时被立刻 `remove`）当作"我占着这台唱片机"的凭据：
+  - `onWorldEvent(1010)` 改为 `pending.get(key)` 而非 `remove`
+  - `T_QUERY` 在无会话时走新增的 `claimFromPending()` → 回 CLAIM 延长对方等待
+  - 解析成功/失败两条路径都显式 `pending.remove(s.key)`，不留残留
+  - `HOLD_TICKS_UNCLAIMED` 6 → 40（0.3s → 2s），给解析留时间
+- **0.9.5**：配置界面新增令牌栏位（`tokenOf()` / `setToken()` 与 `httpHeaders` 的 X-Token 双向映射），
+  `ROW_STEP` 20 → 18 以容纳网络页第 9 行；两份配置的 URL 统一去掉了内嵌 `?token=`
+- **仍待解决**：首次插入若右键未被识别（`待确认插入=false`，疑为"机内有碟时换碟"的右键路径），
+  当前只会让它在 2 秒后回落原版；根因未查清，方向是"看到 1010 就直接读方块实体里的碟名"
 ## 0.9.3
 
 **修复 lib 在单人/局域网不生效（Fabric 环境标记的经典坑）**

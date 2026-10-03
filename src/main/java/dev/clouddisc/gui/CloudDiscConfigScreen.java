@@ -45,7 +45,7 @@ public class CloudDiscConfigScreen extends Screen {
 
 	private static final int ROWS = 7;
 	private static final int ROW_START = 48;
-	private static final int ROW_STEP = 20;
+	private static final int ROW_STEP = 18;
 	private static final int LABEL_X_OFFSET = -158;
 	private static final int FIELD_X_OFFSET = -5;
 	private static final int FIELD_WIDTH = 168;
@@ -149,6 +149,7 @@ public class CloudDiscConfigScreen extends Screen {
 		row(5, "网易云：外链模板（{id} 占位）", textField(5, cfg.neteaseUrlTemplate, v -> cfg.neteaseUrlTemplate = v));
 		row(6, "自建解析服务（可选，最可靠）", textField(6, cfg.neteaseEndpoint, v -> cfg.neteaseEndpoint = v));
 		row(7, "服务端中继（服主装了同一个 jar 才生效）", toggle(7, () -> cfg.enableServerRelay, v -> cfg.enableServerRelay = v));
+		row(8, "解析服务令牌（自动作为 X-Token 发送）", textField(8, tokenOf(cfg), v -> setToken(cfg, v)));
 	}
 
 	// ------------------------------------------------------------ 控件构造
@@ -223,6 +224,24 @@ public class CloudDiscConfigScreen extends Screen {
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(values[idx[0]]));
 		}).dimensions(this.width / 2 + FIELD_X_OFFSET, rowY(index), FIELD_WIDTH, 20).build();
+	}
+
+	/** 从 httpHeaders 里取出 X-Token 的值（界面上显示用）。 */
+	private static String tokenOf(CloudDiscConfig cfg) {
+		if (cfg.httpHeaders != null) {
+			for (String h : cfg.httpHeaders) {
+				if (h != null && h.regionMatches(true, 0, "X-Token:", 0, 8)) {
+					return h.substring(8).trim();
+				}
+			}
+		}
+		return "";
+	}
+
+	/** 把界面上的令牌写回 httpHeaders（空值就不带该请求头）。 */
+	private static void setToken(CloudDiscConfig cfg, String token) {
+		String t = token == null ? "" : token.trim();
+		cfg.httpHeaders = t.isEmpty() ? new String[0] : new String[] { "X-Token: " + t };
 	}
 
 	private static String fmt(float v) {

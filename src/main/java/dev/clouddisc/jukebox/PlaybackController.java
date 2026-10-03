@@ -82,7 +82,7 @@ public final class PlaybackController {
 	/** 右键后等世界事件的窗口（tick）。 */
 	private static final int PENDING_TICKS = 60;
 	/** 没收到 CLAIM 时静音等待的窗口：很短，避免误伤普通唱片。 */
-	private static final int HOLD_TICKS_UNCLAIMED = 6;
+	private static final int HOLD_TICKS_UNCLAIMED = 40;
 	/** 收到 CLAIM 后愿意等 PLAY 的窗口。 */
 	private static final int HOLD_TICKS_CLAIMED = 140;
 
@@ -177,6 +177,24 @@ public final class PlaybackController {
 	 * <p>CLAIM 的语义恰好就是"这块归我，先别放原版"：它会把对方的等待窗口延长到
 	 * {@code HOLD_TICKS_CLAIMED}，于是它安静地等我们的 PLAY，不再放原版。
 	 */
+	/**
+	 * 解析阶段（会话尚未进入 sessions 表）被询问时，用 pending 里的会话回一个 CLAIM。
+	 *
+	 * <p><b>为什么需要它</b>（实测现象："偶现先响一下原版唱片，几秒后才切成网易云"）：
+	 * 会话是在**解析完成后的回调**里才放进表的，而解析（查真名 + 换地址）要 1~3 秒。
+	 * 这段时间里有人来问"谁在放什么"，我们这边"看起来什么都没有" → 不回话 →
+	 * 对方按设计补放原版唱片声 → 等我们的 PLAY 到了才接管。
+	 * pending 从右键那一刻就存在，正好补上这个空窗期。
+	 */
+	private void claimFromPending(String key, long nowTick) {
+		Pending p = pending.get(key);
+		if (p == null || p.expireTick < nowTick) {
+			return;
+		}
+		announcer.announceClaim(p.session, nowTick);
+		CloudDiscClient.LOGGER.info("[CloudDisc] 询问到达时本机正在解析 → 回 CLAIM 让对方继续等（避免它回落原版）");
+	}
+
 	private void claimIfNotScheduledYet(JukeboxSession s, long nowTick) {
 		if (s.localStartTick > 0L) {
 			return; // 已经有合法开始刻了，上面的应答就够
@@ -195,7 +213,9 @@ public final class PlaybackController {
 		String key = Protocol.key(dimId, pos.asLong());
 
 		if (eventId == 1010) {
-			Pending p = pending.remove(key);
+			// 不再立刻移除：解析阶段（会话还没进表）它就是"我占着这台唱片机"的凭据，
+			// 用来在被询问时回 CLAIM，避免对方 300ms 收不到回应而回落原版唱片声。
+			Pending p = pending.get(key);
 			CloudDiscClient.LOGGER.info("[CloudDisc] 收到世界事件 1010（唱片机开始播放）@ {} 物品ID={}｜本机待确认插入={} 已有会话={} 各通道对端: {}",
 					pos, data, p != null, sessions.containsKey(key), announcer.peerSummary());
 			if (p != null) {
@@ -322,6 +342,8 @@ public final class PlaybackController {
 				if (s != null) {
 					announcer.announceAnswer(s, nowTick);
 					claimIfNotScheduledYet(s, nowTick);
+				} else {
+					claimFromPending(key, nowTick);
 				}
 			}
 			case Protocol.T_QUERY_ALL -> {
@@ -522,6 +544,7 @@ public final class PlaybackController {
 		provider.resolve(s.trackId, cfg).whenComplete((track, err) ->
 				MinecraftClient.getInstance().execute(() -> {
 					if (err != null || track == null) {
+						pending.remove(s.key);
 						CloudDiscClient.LOGGER.warn("[CloudDisc] 解析失败 {}:{} -> {}", s.provider, s.trackId, String.valueOf(err));
 						return;
 					}
@@ -547,6 +570,7 @@ public final class PlaybackController {
 					s.uri = track.uri();
 					s.durationMs = track.durationMsHint();
 					s.state = JukeboxSession.State.PREPARING;
+					pending.remove(s.key);
 					JukeboxSession old = sessions.put(s.key, s);
 					if (old != null && old != s) {
 						old.dispose();
