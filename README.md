@@ -110,6 +110,24 @@
 
 ---
 
+## 作者合影
+
+<table>
+<tr>
+<td align="center" width="50%">
+<img src="docs/images/skin-head-plain.png" width="128" alt="作者头像"><br>
+<b>_wanpi_</b><br>
+<sub>点子 · 需求 · 测试 · 服务器<br>（"唱针必须落在原版唱片机上"这条是他定的）</sub>
+</td>
+<td align="center" width="50%">
+<img src="docs/images/agent-fish.jpg" width="128" alt="那只蓝鱼"><br>
+<b>蓝色大肥鱼</b><br>
+<sub>写代码 · 查 bug · 写文档<br>（出力最多的那位，据作者说）</sub>
+</td>
+</tr>
+</table>
+
+> 一个提想法、一个往里填实现；从"能不能让唱片机放网易云"问到"服务端要不要改时长"，一路吵到 0.9.9 ✗
 ## 许可
 
 [MIT](LICENSE)。内置的 JLayer（MP3 解码）为 LGPL-2.1，见 [THIRD-PARTY.md](THIRD-PARTY.md)。
