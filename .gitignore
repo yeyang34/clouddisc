@@ -23,3 +23,6 @@ Thumbs.db
 # 本地测试用（每个人的游戏目录不同，不进仓库）
 clouddisc-music/
 config/
+
+# 自建解析服务（个人自用，不进公开仓库）
+server-resolver/
