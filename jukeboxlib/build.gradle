@@ -3,7 +3,7 @@ plugins {
 }
 
 // 独立子项目：产出【独立的 lib jar】，与音乐 mod 互不打包
-version = '1.0.0'
+version = '1.0.1'
 group = project.maven_group
 
 base {

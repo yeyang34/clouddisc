@@ -17,7 +17,7 @@
 	"mixins": [
 		{
 			"config": "clouddisc-jukeboxlib.mixins.json",
-			"environment": "server"
+			"environment": "*"
 		}
 	],
 	"depends": {

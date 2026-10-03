@@ -6,6 +6,19 @@
 
 ---
 
+## 0.9.3
+
+**修复 lib 在单人/局域网不生效（Fabric 环境标记的经典坑）**
+
+- 现象：单人游戏里装了 `clouddisc-jukeboxlib` 仍然被唱片时长掐断。
+- 根因：lib 的 mixin 配置写成 `"server": [...]`、`fabric.mod.json` 里 `"environment": "server"` ——
+  这个 `server` 指的是**独立服务端**；而单人/局域网的"服务端"是**客户端进程里的内置服务端**，
+  物理环境仍是 CLIENT → Mixin **根本不会被应用** ✗
+- 修法：mixin 配置改为通用数组 `"mixins": [...]`、`fabric.mod.json` 改为 `"environment": "*"` ✓
+  （在多人客户端上应用它无害：`isSongFinished` 在客户端侧本来就不会被调用）
+- 验证：refmap 仍解析出 `isSongFinished → class_2619;method_44372(class_1813)Z` ✓；
+  实测（单人、最短唱片 + 4 分钟长曲）完整播完 ✓、拔碟立刻停 ✓
+- 版本：附加组件 **1.0.1**；音乐 mod **0.9.3**（仅更新日志文本变化）
 ## 0.9.2 / 0.9.1 / 0.9.0
 
 **服务端可选组件解决"长曲被唱片时长掐断"，音乐 Mod 回归干净行为**

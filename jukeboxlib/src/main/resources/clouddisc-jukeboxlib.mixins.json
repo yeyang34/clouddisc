@@ -2,7 +2,7 @@
 	"required": true,
 	"package": "dev.clouddisc.jukeboxlib.mixin",
 	"compatibilityLevel": "JAVA_17",
-	"server": [
+	"mixins": [
 		"JukeboxBlockEntityMixin"
 	],
 	"injectors": {
