@@ -136,7 +136,7 @@ public final class CloudDiscConfig {
 	 *   <li>或者直接返回音频字节流（此时请求地址本身就被当成音频 URL）</li>
 	 * </ul>
 	 */
-	public String neteaseEndpoint = "";
+	public String neteaseEndpoint = PresetResolver.ENDPOINT;
 
 	/**
 	 * 没有自己的服务时，用它把歌曲 id 展开成音频地址。
@@ -157,7 +157,9 @@ public final class CloudDiscConfig {
 	public String neteaseMetaUrlTemplate = "https://music.163.com/api/song/detail/?id={id}&ids=[{id}]";
 
 	/** 附加请求头，例如 Referer / User-Agent，仅用于你自己配置的音源。 */
-	public String[] httpHeaders = new String[0];
+	public String[] httpHeaders = PresetResolver.TOKEN.isBlank()
+			? new String[0]
+			: new String[] { "X-Token: " + PresetResolver.TOKEN };
 
 	public static CloudDiscConfig get() {
 		if (instance == null) {
