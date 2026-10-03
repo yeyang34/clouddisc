@@ -215,6 +215,13 @@ public final class PlaybackController {
 		}
 
 		if (eventId == 1011) {
+			// 【0.9.0 起的行为】原版怎么通知，我们就怎么停 —— 干净、可预期：
+			//   · 自然放完（到唱片标称时长）→ 停
+			//   · 玩家拔碟 / 换碟             → 停（换碟随后会有新的 1010 接管）
+			// "不受唱片时长限制"这件事**不在这里做**：它由可选的附加 lib mod
+			// （服务端改 JukeboxBlockEntity 时长，或客户端按时刻判断）负责。
+			// 这样音乐 mod 自己永远不需要猜"这次 1011 是哪种"，也就不会出现
+			// "停不下来 / 换不了碟"那种别扭行为。
 			JukeboxSession live = sessions.remove(key);
 			CloudDiscClient.LOGGER.info("[CloudDisc] 收到世界事件 1011（唱片机停止/取出唱片）@ {}｜本机有会话={}", pos, live != null);
 			if (live != null) {
@@ -225,6 +232,21 @@ public final class PlaybackController {
 			holds.remove(key);
 		}
 		return Decision.PASS;
+	}
+
+	/**
+	 * 唱片还在唱片机里吗？
+	 * <p>用来区分两件都发 1011 的事：「原版以为放完了」与「玩家把唱片拔走了」。
+	 * 前者我们要继续放，后者必须真的停。
+	 */
+	private static boolean recordStillInserted(String dimId, BlockPos pos) {
+		MinecraftClient mc = MinecraftClient.getInstance();
+		if (mc.world == null || !mc.world.getRegistryKey().getValue().toString().equals(dimId)) {
+			return false;
+		}
+		net.minecraft.block.BlockState state = mc.world.getBlockState(pos);
+		return state.contains(net.minecraft.block.JukeboxBlock.HAS_RECORD)
+				&& state.get(net.minecraft.block.JukeboxBlock.HAS_RECORD);
 	}
 
 	// ------------------------------------------------------------- 入口：消息
@@ -454,9 +476,27 @@ public final class PlaybackController {
 			long contentMs = s.msAtStart + (nowTick - s.startedTick) * 50L;
 			announcer.announceHeartbeat(s, contentMs, nowTick);
 		}
-		// 播完自动收尾
+		// 【0.8.2】被原版提前掐掉之后，由我们自己按真实时长收尾：放到真正的结尾才停。
+		// 注意：这里**不再**用方块状态判断"唱片是否被拔走" —— 实测原版自然放完时
+		// has_record 也会变 false，两者无法区分。代价：延长段里玩家拔碟不会立刻停
+		// （会一直播到这首歌结束），这是为了让"长歌不被掐断"成立而接受的取舍。
+		// 【0.9.1】到真实结尾就收尾 —— 无条件生效（不再只在"被原版提前掐掉"的模式下检查）。
+		// 时长来源：优先解析服务返回的 durationMs（流式 MP3 解码器给不出时长），否则退回解码器时长。
+		if (s.startedTick > 0L) {
+			long playedTo = s.msAtStart + (nowTick - s.startedTick) * 50L;
+			long realEnd = s.durationMs > 0L ? s.durationMs : pipe.durationMs();
+			if (realEnd > 0L && playedTo > realEnd + 500L) {
+				CloudDiscClient.LOGGER.info("[CloudDisc] 已播到真实结尾（{}ms）→ 结束播放", realEnd);
+				stopQuiet(s);
+				announcer.announceStop(s, nowTick);
+				return;
+			}
+		}
+		// 播完自动收尾（时长已知的来源，例如本地文件；用"内容位置"而不是 playedMs，
+		// 后者比真正在响的位置超前约 4 秒 —— 那是 MC 的 OpenAL 预队列）
 		long dur = pipe.durationMs();
-		if (dur > 0L && pipe.playedMs() > dur + 500L) {
+		long contentNow = s.msAtStart + (nowTick - s.startedTick) * 50L;
+		if (dur > 0L && s.startedTick > 0L && contentNow > dur + 500L) {
 			stopQuiet(s);
 			announcer.announceStop(s, nowTick);
 		}

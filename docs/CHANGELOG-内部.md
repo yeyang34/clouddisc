@@ -6,6 +6,31 @@
 
 ---
 
+## 0.9.2 / 0.9.1 / 0.9.0
+
+**服务端可选组件解决"长曲被唱片时长掐断"，音乐 Mod 回归干净行为**
+
+- **先纠正一个错误假设**：0.8.1 曾用方块状态 `JukeboxBlockEntity` 的 `has_record` 区分
+  "自然放完"与"玩家拔碟" —— 实测**失败**：原版自然放完时 `has_record` 同样变 false，
+  两种情况无法用它区分；更糟的是它导致"拔碟不停、换碟不生效"。
+- **另一个真根因**：随 0.8.0 引入的 `durationMs` 当时恒为 `0` ——
+  旧接口 `api/song/detail` **不返回 `dt`**，于是所有"知道真实时长"的判断都不成立。
+  改为先问本机社区项目（`/song/detail` 一定带 `dt`），实测：`188204 → 248964ms` ✓
+- **挂点用一手源码 + refmap 双重确认**（不再靠猜）：
+  - 反编译 `JukeboxBlockEntity` 得到判断式 `worldTime >= recordStartTick + disc.getSongLengthInTicks() + 20`
+  - Yarn 名核实：`JukeboxBlockEntity#isSongFinished(MusicDiscItem)`（private）、
+    `#startPlaying()`、`#getStack(int)`、`MusicDiscItem#getSongLengthInTicks()`
+  - 构建产物 refmap 确认解析成功：
+    `isSongFinished → class_2619;method_44372(class_1813)Z`、`startPlaying → class_2619;method_49212()V`
+- **服务端组件**（独立 jar `clouddisc-jukeboxlib`，6 KB）：`@Inject(HEAD, cancellable)` 到
+  `isSongFinished`，对"自定义名以 `@` 开头"的唱片返回 `false`；用 `@Unique` 记开始刻并设
+  延长时间上限（默认 6 分钟），避免碟不取出时方块永远停在"播放中"（音符粒子/GameEvent 持续发）。
+  原版唱片路径完全不变 ✓
+- **音乐 Mod 侧**：
+  - 收到 1011 一律按原版语义停止（拔碟即停、换碟正常）—— 不再做任何猜测
+  - "到真实结尾收尾"改为**无条件生效**，时长优先用解析服务给的 `s.durationMs`，
+    否则退回 `pipe.durationMs()`；**不再用 `pipe.playedMs()`**（它比真正在响的位置超前约 4 秒）
+  - `fabricloader` 依赖由 `>=0.16.10` 放宽到 `>=0.15.0`（服务端 0.15.11 才能真正加载本 jar）
 ## 0.7.0
 
 **工程化：GitHub 托管 + 日志分表里**

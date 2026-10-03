@@ -1,0 +1,32 @@
+{
+	"schemaVersion": 1,
+	"id": "clouddisc_jukeboxlib",
+	"version": "${version}",
+	"name": "CloudDisc JukeboxLib",
+	"description": "CloudDisc 的可选附加组件：解除原版唱片自带时长对长曲的限制。只对自定义名以 @ 开头的唱片生效，服务器上其他人的原版唱片完全不受影响。不装它时音乐 mod 照常工作。",
+	"authors": [
+		"yeyang34"
+	],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.clouddisc.jukeboxlib.JukeboxLib"
+		]
+	},
+	"mixins": [
+		{
+			"config": "clouddisc-jukeboxlib.mixins.json",
+			"environment": "server"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.15.0",
+		"minecraft": "~1.20.1",
+		"java": ">=17",
+		"fabric-api": "*"
+	},
+	"recommends": {
+		"clouddisc": "*"
+	}
+}

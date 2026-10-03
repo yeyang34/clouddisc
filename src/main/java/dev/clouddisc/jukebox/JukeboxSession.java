@@ -37,6 +37,10 @@ public final class JukeboxSession {
 	public String title;
 	public String uri;
 	public long durationMs;
+	/** 0.8.1：曾被原版按唱片自带时长提前发过 1011（歌比唱片长），此后由我们自己按真实时长收尾。 */
+	public boolean extendedPastVanillaEnd;
+	/** 上一次检查"唱片还在不在机子里"的刻。 */
+	public long lastExtendCheckTick = Long.MIN_VALUE / 2;
 
 	/** 换算到本机 gameTime 的开始刻（含预缓冲 lead）。 */
 	public long localStartTick;
