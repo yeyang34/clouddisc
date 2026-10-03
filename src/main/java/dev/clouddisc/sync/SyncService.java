@@ -122,10 +122,15 @@ public final class SyncService implements PlaybackController.Announcer {
 			}
 		}
 		// 中继报到与询问一起重试（服务器刚启动/玩家刚进来时，第一次报到可能过早）
-		if (relayTransport != null && !relayTransport.isReady() && mc.world != null) {
+		// 周期性向服务端中继续报 —— **无论当前是否"就绪"**。
+		// 实测根因：客户端过去只在"未就绪"时才补报，而"就绪"取决于"最近收到过应答"；
+		// 应答一过期就会出现一段"没有任何通道"的窗口（日志里 relay=0, chat=0），
+		// 恰好在这段窗口里放碟 → PLAY 发不出去 → 跟随方回落原版（表现为"时好时坏"）。
+		// 现在每 20 秒续一次（远小于应答有效期），通道基本恒为可用。
+		if (relayTransport != null && mc.world != null) {
 			relayHelloCooldown--;
 			if (relayHelloCooldown <= 0) {
-				relayHelloCooldown = 60;
+				relayHelloCooldown = 400;   // 20 秒
 				relayTransport.sayHello();
 			}
 		}

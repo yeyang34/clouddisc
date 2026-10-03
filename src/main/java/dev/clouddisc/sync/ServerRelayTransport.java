@@ -24,7 +24,7 @@ import java.util.function.Consumer;
  */
 public final class ServerRelayTransport implements Transport {
 	/** 应答有效期：超过这么久没再收到应答，就认为中继不可用（例如换了服务器）。 */
-	private static final long ACK_TTL_MILLIS = 60_000L;
+	private static final long ACK_TTL_MILLIS = 600_000L;
 	/** 报到最多重试这么多次（每次间隔 3 秒）——避免在没有中继的服务器上无限发包。 */
 	private static final int MAX_HELLO_ATTEMPTS = 20;
 
