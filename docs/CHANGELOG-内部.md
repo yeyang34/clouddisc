@@ -6,6 +6,18 @@
 
 ---
 
+## 0.9.9 / 0.9.8
+
+**修复中继通道周期性静默失效（跟随方回落原版的真根因）**
+
+- 日志证据（服务器联机）：三次放碟前中继状态分别为 `relay=1, chat=1`（正常）、`relay=1, chat=0`、
+  `relay=0, chat=0`（✗）；`relay=0` 的两次跟随方听到原版；20:56 放碟时 `udp=0, relay=0, chat=0`。
+- 机制：`isReady()` = "距上次 ACK < ACK_TTL(60s)"，而 `SyncService` 只在 `!isReady()` 时补发 HELLO，
+  且 `sayHello()` 受 `MAX_HELLO_ATTEMPTS = 20`（每 3 秒一次 ≈ 7 分钟）限制 → 撞上限后**永久停止续报**。
+  只有"退房重进"会 `resetAttempts()` —— 与"退房重进有时好使"完全吻合。
+- 修法：`ACK_TTL_MILLIS` 60_000 → 600_000；ACK 时 `helloAttempts = 0`；
+  `SyncService` 改为**无条件**每 400 刻（20 秒）续报。
+- 服务端组件未改动（`CloudDiscServer` 自 0.4.4 起稳定，频道名/首字节/约定版本为冻结接口）。
 ## 0.9.6 / 0.9.5 / 0.9.4
 
 **补上"解析阶段无人应答"的空窗 + 令牌可视化**
