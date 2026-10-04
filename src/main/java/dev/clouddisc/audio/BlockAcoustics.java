@@ -209,7 +209,7 @@ public final class BlockAcoustics {
 				|| g == BlockSoundGroup.AMETHYST_CLUSTER || g == BlockSoundGroup.SMALL_AMETHYST_BUD
 				|| g == BlockSoundGroup.MEDIUM_AMETHYST_BUD || g == BlockSoundGroup.LARGE_AMETHYST_BUD
 				|| g == BlockSoundGroup.FROGLIGHT || g == BlockSoundGroup.SHROOMLIGHT) {
-			return new Base("声音组 GLASS(玻璃/水晶)", 0.25f, 0.90f, 0.10f);
+			return new Base("声音组 GLASS(玻璃/水晶)", 0.55f, 0.90f, 0.10f);
 		}
 		// ---- 羊毛 / 苔藓 / 雪：强吸声，几乎不反射 ----
 		if (g == BlockSoundGroup.WOOL || g == BlockSoundGroup.MOSS_CARPET || g == BlockSoundGroup.MOSS_BLOCK
