@@ -44,9 +44,9 @@ public class CloudDiscConfigScreen extends Screen {
 	private static final int SECTION_COUNT = 5;
 	private static final String[] SECTION_NAMES = {"播放设置", "物理声效", "网络与音源", "使用教程", "更新日志"};
 
-	private static final int ROWS = 7;
+	private static final int ROWS = 9;
 	private static final int ROW_START = 74;
-	private static final int ROW_STEP = 18;
+
 	private static final int LABEL_X_OFFSET = -158;
 	private static final int FIELD_X_OFFSET = -5;
 	private static final int FIELD_WIDTH = 168;
@@ -73,6 +73,7 @@ public class CloudDiscConfigScreen extends Screen {
 	private int layRight;
 	private int layFieldX;
 	private int layFieldW;
+	private int layRowStep = 18;
 
 	private void computeLayout() {
 		int pad = 14;
@@ -82,6 +83,8 @@ public class CloudDiscConfigScreen extends Screen {
 		// 控件列：只占右侧 40%，这样输入框/开关靠右，与底部按钮对齐成一条"控件列"
 		layFieldW = Math.max(76, Math.min(FIELD_WIDTH, (int) (avail * 0.40)));
 		layFieldX = layRight - layFieldW;
+		// 行距随窗口高度自适应：保证 9 行都在底部按钮带之上（按钮带从 height-40 开始）
+		layRowStep = Math.max(12, Math.min(18, (this.height - 118) / ROWS));
 	}
 	private int scroll;
 	private List<String> textLines = List.of();
@@ -188,7 +191,7 @@ public class CloudDiscConfigScreen extends Screen {
 		row(6, "方向性（声音从拐角绕过来）", toggle(6, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
 		row(7, "调试日志 + 材质探针（每轮打印命中方块）", toggle(7, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
 		// 第 9 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
-		int y = ROW_START + 8 * ROW_STEP + 6;
+		int y = ROW_START + 8 * layRowStep + 6;
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
@@ -218,7 +221,7 @@ public class CloudDiscConfigScreen extends Screen {
 	// ------------------------------------------------------------ 控件构造
 
 	private void row(int index, String label, ClickableWidget widget) {
-		int y = ROW_START + index * ROW_STEP;
+		int y = ROW_START + index * layRowStep;
 		int maxLabelW = Math.max(24, layFieldX - 10 - (layLeft + 6));
 		String shown = this.textRenderer.trimToWidth(label, maxLabelW);
 		labels.add(new Label(Text.literal(shown), layLeft + 6, y + 6));
@@ -226,7 +229,7 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	private int rowY(int index) {
-		return ROW_START + index * ROW_STEP;
+		return ROW_START + index * layRowStep;
 	}
 
 	private TextFieldWidget textField(int index, String initial, Consumer<String> set) {
@@ -438,8 +441,8 @@ public class CloudDiscConfigScreen extends Screen {
 			int left = layLeft;
 			int right = layRight;
 			for (int i = 0; i < ROWS; i++) {
-				int y = ROW_START + i * ROW_STEP - 3;
-				int bottom = y + ROW_STEP - 2;
+				int y = ROW_START + i * layRowStep - 3;
+				int bottom = y + layRowStep - 2;
 				if (bottom > this.height - 44) {
 					break;
 				}
@@ -510,8 +513,6 @@ public class CloudDiscConfigScreen extends Screen {
 			for (Label label : labels) {
 				context.drawTextWithShadow(this.textRenderer, label.text(), label.x(), label.y(), 0xE0E0E0);
 			}
-			context.drawCenteredTextWithShadow(this.textRenderer,
-					Text.literal("改完记得点『保存』　·　带 ⚠ 的需重启游戏"), this.width / 2, this.height - 40, 0xA0A0A0);
 		}
 		super.render(context, mouseX, mouseY, delta);
 	}
