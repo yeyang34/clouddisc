@@ -929,6 +929,13 @@ public final class Acoustics {
 		final double[] acc = {0.0};
 		RayWalk.walk(from.x, from.y, from.z, to.x, to.y, to.z, MAX_OCC_STEPS, (x, y, z, t, nx, ny, nz) -> {
 			BlockPos p = new BlockPos(x, y, z);
+			// 【0.12.27】排除唱片机自身及其紧邻 3×3×3：
+			// 射线终点带 ±0.4 偏移，否则会打到"唱片机旁的墙/脚下底座/头顶方块"，
+			// 于是"把唱片机垫高 4 格、人站在正下方"也会被判成被挡（实测反直觉）。
+			if (skip != null && Math.abs(x - skip.getX()) <= 1 && Math.abs(y - skip.getY()) <= 1
+					&& Math.abs(z - skip.getZ()) <= 1) {
+				return true;
+			}
 			if (skip != null && p.equals(skip)) {
 				return true;
 			}
