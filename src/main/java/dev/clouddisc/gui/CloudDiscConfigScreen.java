@@ -74,11 +74,6 @@ public class CloudDiscConfigScreen extends Screen {
 	private int layFieldX;
 	private int layFieldW;
 	private int layRowStep = 18;
-	// 自绘胶囊开关：记录"哪一行是开关"及其读写方式
-	private final java.util.Map<Integer, java.util.function.BooleanSupplier> toggleGetters = new java.util.LinkedHashMap<>();
-	private final java.util.Map<Integer, java.util.function.Consumer<Boolean>> toggleSetters = new java.util.LinkedHashMap<>();
-	private static final int CAPSULE_W = 52;
-	private static final int CAPSULE_H = 16;
 
 	private void computeLayout() {
 		int pad = 14;
@@ -103,9 +98,6 @@ public class CloudDiscConfigScreen extends Screen {
 
 	@Override
 	protected void init() {
-		computeLayout();
-		toggleGetters.clear();
-		toggleSetters.clear();
 		computeLayout();
 		clearChildren();
 		labels.clear();
@@ -250,14 +242,11 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	private ButtonWidget toggle(int index, BooleanSupplier get, Consumer<Boolean> set) {
-		// 登记这一行是开关；真正的样子由 render() 自绘胶囊，点击由 mouseClicked 处理。
-		// 保留一个不可见按钮占位（不参与绘制与点击），避免 row() 里 addDrawableChild 拿到 null。
-		toggleGetters.put(index, get);
-		toggleSetters.put(index, set);
-		ButtonWidget placeholder = ButtonWidget.builder(Text.literal(""), b -> {
+		return ButtonWidget.builder(Text.literal(get.getAsBoolean() ? "开" : "关"), b -> {
+			boolean next = !get.getAsBoolean();
+			set.accept(next);
+			b.setMessage(Text.literal(next ? "开" : "关"));
 		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
-		placeholder.visible = false;
-		return placeholder;
 	}
 
 	private ButtonWidget cycleInt(int index, int[] values, IntSupplier get, IntConsumer set) {
@@ -384,25 +373,6 @@ public class CloudDiscConfigScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		// 胶囊开关：点一下就切换（0.12.23 起不再是原版按钮）
-		if (button == 0 && section < SECTION_GUIDE && !toggleGetters.isEmpty()) {
-			int cw = Math.min(CAPSULE_W, Math.max(28, layFieldW - 8));
-			int cxp = layFieldX + layFieldW - cw;
-			for (java.util.Map.Entry<Integer, java.util.function.BooleanSupplier> e : toggleGetters.entrySet()) {
-				int ry = rowY(e.getKey());
-				int cy = ry + (20 - CAPSULE_H) / 2;
-				if (mouseX >= cxp && mouseX < cxp + cw && mouseY >= cy && mouseY < cy + CAPSULE_H) {
-					java.util.function.Consumer<Boolean> setter = toggleSetters.get(e.getKey());
-					if (setter != null) {
-						try {
-							setter.accept(!e.getValue().getAsBoolean());
-						} catch (Throwable ignored) {
-						}
-					}
-					return true;
-				}
-			}
-		}
 		// 顶部标签栏：点一下切分区（与底部 ◀/▶ 等效）
 		if (button == 0 && mouseY >= 52 && mouseY < 70) {
 			int tabH = 18, gap = 6;
@@ -511,31 +481,6 @@ public class CloudDiscConfigScreen extends Screen {
 				context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(SECTION_NAMES[i]),
 						x + w[i] / 2, y + 5, tc);
 				x += w[i] + gap;
-			}
-		}
-		// ---------------- 自绘胶囊开关（开=绿、关=灰；右侧对齐到控件列） ----------------
-		if (section < SECTION_GUIDE && !toggleGetters.isEmpty()) {
-			int cw = Math.min(CAPSULE_W, Math.max(28, layFieldW - 8));
-			int ch = CAPSULE_H;
-			int cxp = layFieldX + layFieldW - cw;
-			for (java.util.Map.Entry<Integer, java.util.function.BooleanSupplier> e : toggleGetters.entrySet()) {
-				int ry = rowY(e.getKey());
-				int cy = ry + (20 - ch) / 2;
-				boolean on = false;
-				try {
-					on = e.getValue().getAsBoolean();
-				} catch (Throwable ignored) {
-				}
-				int track = on ? 0xFF2E7D46 : 0xFF3A3A40;
-				int knob = on ? 0xFF58C46A : 0xFF8A8A95;
-				// 用三层 fill 模拟圆角胶囊（上下各内缩 2px、左右各内缩 1px）
-				context.fill(cxp + 2, cy, cxp + cw - 2, cy + ch, track);
-				context.fill(cxp + 1, cy + 1, cxp + cw - 1, cy + ch - 1, track);
-				context.fill(cxp, cy + 3, cxp + cw, cy + ch - 3, track);
-				// 圆点：开在右、关在左
-				int kx = on ? cxp + cw - ch + 2 : cxp + 2;
-				context.fill(kx, cy + 2, kx + ch - 4, cy + ch - 2, knob);
-				context.fill(kx + 1, cy + 1, kx + ch - 5, cy + ch - 1, knob);
 			}
 		}
 		// ---------------- 装饰到此为止，下面全是原有绘制 ----------------
