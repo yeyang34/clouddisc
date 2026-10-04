@@ -156,6 +156,8 @@ public final class Acoustics {
 		float lastK;
 		/** 0.12.6 诊断：主射线（未放宽）的遮挡值，用来对比"放宽了多少"。 */
 		float lastOccMain;
+	/** 空间封闭度闸门（0=开阔不闷，1=封闭满物理）。 */
+	float lastSpaceGate = 1.0f;
 		/** 开阔度 0..1（M4 起由"共享空气空间"算出）。 */
 		float openness = 1.0f;
 		/** 想要写进 EAXReverb 的参数，以及"已经写进去的"（用来做变化阈值判定）。 */
@@ -471,7 +473,9 @@ public final class Acoustics {
 			//   · 双方都在开阔空间 → 遮挡 ×0.15（树后几乎不闷）
 			//   · 声源开阔、听者在室内 → ×0.85（你隔着自己家的墙听外面的唱片机，该闷）
 			//   · 声源被封闭（小屋/矿洞里的唱片机）→ ×1.0（完整物理，门开/门关照旧生效）
-			occ *= spaceGate(world, ear, center);
+			float gate = spaceGate(world, ear, center);
+			st.lastSpaceGate = gate;
+			occ *= gate;
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
@@ -1030,10 +1034,16 @@ public final class Acoustics {
 		for (double[] d : dirs) {
 			total++;
 			try {
+				// 【0.12.34】起点必须离开方块本身 0.6 格：否则向下的射线会撞到脚下的底座、
+				// 水平射线会撞到唱片机自己或紧贴的方块，于是"露天也会被判成封闭"（实测真凶）。
+				Vec3d from = p.add(d[0] * 0.6, d[1] * 0.6, d[2] * 0.6);
 				Vec3d to = p.add(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0);
-				BlockHitResult hit = world.raycast(new RaycastContext(p, to, RaycastContext.ShapeType.COLLIDER,
+				BlockHitResult hit = world.raycast(new RaycastContext(from, to, RaycastContext.ShapeType.COLLIDER,
 						RaycastContext.FluidHandling.NONE, self));
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
+					open++;
+				} else if (hit.getPos().distanceTo(p) < 2.0) {
+					// 2 格以内的命中不算"封闭"：脚下的地面、贴着声源的方块都属于"就地放置"，不是墙
 					open++;
 				}
 			} catch (Throwable ignored) {
