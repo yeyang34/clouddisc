@@ -192,7 +192,7 @@ public class CloudDiscConfigScreen extends Screen {
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
-		labels.add(new Label(Text.literal("状态: " + efx), this.width / 2 + LABEL_X_OFFSET, y));
+		labels.add(new Label(Text.literal("状态: " + efx), (layLeft + 6), y));
 	}
 
 	// ------------------------------------------------------- 第 3 节：网络与音源
@@ -230,7 +230,7 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	private TextFieldWidget textField(int index, String initial, Consumer<String> set) {
-		TextFieldWidget field = new TextFieldWidget(this.textRenderer, this.width / 2 + FIELD_X_OFFSET, rowY(index),
+		TextFieldWidget field = new TextFieldWidget(this.textRenderer, layFieldX, rowY(index),
 				FIELD_WIDTH, 20, Text.literal(""));
 		field.setMaxLength(200);
 		field.setText(initial == null ? "" : initial);
