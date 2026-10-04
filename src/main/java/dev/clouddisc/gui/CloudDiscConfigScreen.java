@@ -68,6 +68,20 @@ public class CloudDiscConfigScreen extends Screen {
 	private final List<Label> labels = new ArrayList<>();
 
 	private int section;
+	// ---- 自适应布局（笔记本小窗口也不会重叠）----
+	private int layLeft;
+	private int layRight;
+	private int layFieldX;
+	private int layFieldW;
+
+	private void computeLayout() {
+		int pad = 14;
+		layLeft = pad;
+		layRight = Math.max(pad + 120, this.width - pad);
+		int avail = layRight - layLeft;
+		layFieldW = Math.max(76, Math.min(FIELD_WIDTH, (int) (avail * 0.52)));
+		layFieldX = layRight - layFieldW;
+	}
 	private int scroll;
 	private List<String> textLines = List.of();
 
@@ -99,16 +113,18 @@ public class CloudDiscConfigScreen extends Screen {
 		}
 
 		int y = this.height - 28;
+		int bw = Math.max(52, ((layRight - layLeft) - 3 * 4) / 4);
+		int bx = layLeft;
 		addDrawableChild(ButtonWidget.builder(Text.literal("◀ 上一节"), b -> {
 			section = (section + SECTION_COUNT - 1) % SECTION_COUNT;
 			scroll = 0;
 			clearAndInit();
-		}).dimensions(this.width / 2 - 155, y, 76, 20).build());
+		}).dimensions(bx, y, bw, 20).build());
 		addDrawableChild(ButtonWidget.builder(Text.literal("下一节 ▶"), b -> {
 			section = (section + 1) % SECTION_COUNT;
 			scroll = 0;
 			clearAndInit();
-		}).dimensions(this.width / 2 - 77, y, 76, 20).build());
+		}).dimensions(bx + bw + 4, y, bw, 20).build());
 
 		ButtonWidget save = ButtonWidget.builder(Text.literal("保存"), b -> {
 			cfg.save();
@@ -119,7 +135,7 @@ public class CloudDiscConfigScreen extends Screen {
 		addDrawableChild(save);
 
 		addDrawableChild(ButtonWidget.builder(Text.literal("关闭"), b -> close())
-				.dimensions(this.width / 2 + 79, y, 76, 20).build());
+				.dimensions(bx + 3 * (bw + 4), y, bw, 20).build());
 	}
 
 	// ------------------------------------------------------------ 第 1 节：播放
@@ -200,7 +216,9 @@ public class CloudDiscConfigScreen extends Screen {
 
 	private void row(int index, String label, ClickableWidget widget) {
 		int y = ROW_START + index * ROW_STEP;
-		labels.add(new Label(Text.literal(label), this.width / 2 + LABEL_X_OFFSET, y + 6));
+		int maxLabelW = Math.max(24, layFieldX - 10 - (layLeft + 6));
+		String shown = this.textRenderer.trimToWidth(label, maxLabelW);
+		labels.add(new Label(Text.literal(shown), layLeft + 6, y + 6));
 		addDrawableChild(widget);
 	}
 
@@ -222,7 +240,7 @@ public class CloudDiscConfigScreen extends Screen {
 			boolean next = !get.getAsBoolean();
 			set.accept(next);
 			b.setMessage(Text.literal(next ? "开" : "关"));
-		}).dimensions(this.width / 2 + FIELD_X_OFFSET, rowY(index), FIELD_WIDTH, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
 	}
 
 	private ButtonWidget cycleInt(int index, int[] values, IntSupplier get, IntConsumer set) {
@@ -237,7 +255,7 @@ public class CloudDiscConfigScreen extends Screen {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(String.valueOf(values[idx[0]])));
-		}).dimensions(this.width / 2 + FIELD_X_OFFSET, rowY(index), FIELD_WIDTH, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
 	}
 
 	private ButtonWidget cycleFloat(int index, float[] values, DoubleSupplier get, DoubleConsumer set) {
@@ -252,7 +270,7 @@ public class CloudDiscConfigScreen extends Screen {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(fmt(values[idx[0]])));
-		}).dimensions(this.width / 2 + FIELD_X_OFFSET, rowY(index), FIELD_WIDTH, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
 	}
 
 	private ButtonWidget cycleString(int index, String[] values, Supplier<String> get, Consumer<String> set) {
@@ -267,7 +285,7 @@ public class CloudDiscConfigScreen extends Screen {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(values[idx[0]]));
-		}).dimensions(this.width / 2 + FIELD_X_OFFSET, rowY(index), FIELD_WIDTH, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
 	}
 
 	/** 从 httpHeaders 里取出 X-Token 的值（界面上显示用）。 */
@@ -351,13 +369,13 @@ public class CloudDiscConfigScreen extends Screen {
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		// 顶部标签栏：点一下切分区（与底部 ◀/▶ 等效）
 		if (button == 0 && mouseY >= 52 && mouseY < 70) {
-			int tabH = 18, gap = 6, pad = 12, totalW = 0;
+			int tabH = 18, gap = 6;
+			int avail = layRight - layLeft;
 			int[] w = new int[SECTION_COUNT];
 			for (int i = 0; i < SECTION_COUNT; i++) {
-				w[i] = this.textRenderer.getWidth(SECTION_NAMES[i]) + pad * 2;
-				totalW += w[i] + (i > 0 ? gap : 0);
+				w[i] = Math.max(24, (avail - gap * (SECTION_COUNT - 1)) / SECTION_COUNT);
 			}
-			int x = this.width / 2 - totalW / 2;
+			int x = layLeft;
 			for (int i = 0; i < SECTION_COUNT; i++) {
 				if (mouseX >= x && mouseX < x + w[i]) {
 					if (section != i) {
@@ -414,8 +432,8 @@ public class CloudDiscConfigScreen extends Screen {
 		context.fill(0, 45, this.width, 47, C_ACCENT);
 		// 内容区：每行一张卡片（左侧一条主色/灰色竖条做层次）
 		if (section < SECTION_GUIDE) {
-			int left = cx + LABEL_X_OFFSET - 8;
-			int right = cx + FIELD_X_OFFSET + FIELD_WIDTH + 8;
+			int left = layLeft;
+			int right = layRight;
 			for (int i = 0; i < ROWS; i++) {
 				int y = ROW_START + i * ROW_STEP - 3;
 				int bottom = y + ROW_STEP - 2;
@@ -436,13 +454,12 @@ public class CloudDiscConfigScreen extends Screen {
 			int tabH = 18;
 			int gap = 6;
 			int pad = 12;
-			int totalW = 0;
+			int avail = layRight - layLeft;
 			int[] w = new int[SECTION_COUNT];
 			for (int i = 0; i < SECTION_COUNT; i++) {
-				w[i] = this.textRenderer.getWidth(SECTION_NAMES[i]) + pad * 2;
-				totalW += w[i] + (i > 0 ? gap : 0);
+				w[i] = Math.max(24, (avail - gap * (SECTION_COUNT - 1)) / SECTION_COUNT);
 			}
-			int x = cx - totalW / 2;
+			int x = layLeft;
 			int y = 52;
 			for (int i = 0; i < SECTION_COUNT; i++) {
 				boolean active = i == section;
