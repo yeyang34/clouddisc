@@ -140,23 +140,30 @@ public class CloudDiscConfigScreen extends Screen {
 	/**
 	 * 物理声效页（纯客户端：只作用于我们自己的那条声源，原版唱片与其它声音完全不受影响）。
 	 *
-	 * <p>三组开关对应计划里的"总开关 / 强度 / 精度"，另外三个是排障用的：
-	 * 严格遮挡、方向性、调试日志。
+	 * <p>三组开关对应计划里的"总开关 / 强度 / 精度"，另外几个是调参与排障用的：
+	 * 遮挡陡度 k、漏音通路数、严格遮挡、方向性、调试日志。
 	 */
 	private void pagePhysics() {
 		row(0, "物理声效总开关（关=干净直通，用于对比）", toggle(0, () -> cfg.physicsSound, v -> {
 			cfg.physicsSound = v;
 			dev.clouddisc.audio.Acoustics.setEnabled(v);
 		}));
-		row(1, "强度（混响发送倍率，0.5 更含蓄）", cycleFloat(1, new float[] {0.0f, 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f},
-				() -> cfg.physicsSoundLevel, v -> cfg.physicsSoundLevel = (float) v));
-		row(2, "精度·混响射线数（越大越准越贵）", cycleInt(2, new int[] {16, 24, 32, 48, 64},
+		row(1, "强度：0=关效果 1=默认 2=最激进（同时调闷度+余响）",
+				cycleFloat(1, new float[] {0.0f, 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f},
+						() -> cfg.physicsSoundLevel, v -> cfg.physicsSoundLevel = (float) v));
+		row(2, "隔墙闷度 k（越大越闷，4.5=默认）",
+				cycleFloat(2, new float[] {2.0f, 3.0f, 4.0f, 4.5f, 5.0f, 6.0f, 7.0f, 9.0f},
+						() -> cfg.physicsAbsorption, v -> cfg.physicsAbsorption = (float) v));
+		row(3, "漏音通路数（几条缝才明显透声，3=默认）",
+				cycleInt(3, new int[] {1, 2, 3, 4, 5, 6, 8}, () -> cfg.physicsOcclusionPaths,
+						v -> cfg.physicsOcclusionPaths = v));
+		row(4, "精度·混响射线数（越大越准越贵）", cycleInt(4, new int[] {16, 24, 32, 48, 64},
 				() -> cfg.physicsRays, v -> cfg.physicsRays = v));
-		row(3, "严格遮挡（开=墙上小缝也算墙）", toggle(3, () -> cfg.physicsStrictOcclusion, v -> cfg.physicsStrictOcclusion = v));
-		row(4, "方向性（声音从拐角绕过来）", toggle(4, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
-		row(5, "调试日志（每 10 秒一行数值）", toggle(5, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
-		// 第 6 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
-		int y = ROW_START + 6 * ROW_STEP + 6;
+		row(5, "严格遮挡（开=墙上小缝也算墙）", toggle(5, () -> cfg.physicsStrictOcclusion, v -> cfg.physicsStrictOcclusion = v));
+		row(6, "方向性（声音从拐角绕过来）", toggle(6, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
+		row(7, "调试日志 + 材质探针（每轮打印命中方块）", toggle(7, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
+		// 第 9 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
+		int y = ROW_START + 8 * ROW_STEP + 6;
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();

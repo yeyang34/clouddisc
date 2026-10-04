@@ -61,14 +61,17 @@ public final class EfxEngine {
 	private static long lastForceTick = Long.MIN_VALUE / 2;
 	private static final float EPS = 0.008f;
 
-	/** 每个混响段的 EAXReverb 参数。数值自己推，不抄 SPR 的配置表。 */
+	/** 每个混响段的 EAXReverb 参数。数值自己推，不抄 SPR 的配置表。
+	 * <p>0.12.6：默认值整体上调（gain 0.28→0.32、decayTime 1.2→1.6、
+	 * reflectionsGain 0.3→0.4、lateReverbGain 0.5→0.65）——
+	 * 这几个值只在"第一轮评估写进去之前"生效，实际参数由 {@code Acoustics.traceReverb} 每轮推。 */
 	public static final class Reverb {
-		public float gain = 0.28f;
+		public float gain = 0.32f;
 		public float gainHF = 0.85f;
-		public float decayTime = 1.2f;
+		public float decayTime = 1.6f;
 		public float decayHFRatio = 0.6f;
-		public float reflectionsGain = 0.3f;
-		public float lateReverbGain = 0.5f;
+		public float reflectionsGain = 0.4f;
+		public float lateReverbGain = 0.65f;
 		public float lateReverbDelay = 0.02f;
 		public float density = 1.0f;
 		public float diffusion = 1.0f;

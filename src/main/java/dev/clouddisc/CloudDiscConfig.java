@@ -24,7 +24,7 @@ public final class CloudDiscConfig {
 	 * 新版本把默认值改成 true 之后，老用户仍然读到 false，表现为"功能像没实现"。
 	 * 有了版本号就能在老配置上做一次迁移。
 	 */
-	public static final int CURRENT_VERSION = 4;
+	public static final int CURRENT_VERSION = 5;
 
 	private static CloudDiscConfig instance;
 
@@ -115,17 +115,49 @@ public final class CloudDiscConfig {
 	 */
 	public boolean physicsSound = true;
 	/**
-	 * 强度（0.0 ~ 2.0，默认 1.0）：混响发送增益的整体倍率。
-	 * <p>遮挡造成的闷响不受它影响（那是"物理事实"），它只调"余响有多湿"。
+	 * 强度（0.0 ~ 2.0，默认 1.0）：<b>整体激进度</b>，同时缩放"遮挡变闷"与"混响发送"。
+	 * <ul>
+	 *   <li>{@code 0.0} = 等同关闭物理声效（干净的直通，不做射线）</li>
+	 *   <li>{@code 1.0} = 默认（推荐）</li>
+	 *   <li>{@code 2.0} = 非常激进（遮挡陡度翻倍 + 混响发送翻倍）</li>
+	 * </ul>
+	 * <p><b>0.12.6 语义改动</b>：以前它<b>只</b>乘在混响发送增益上（遮挡是"物理事实"不受影响），
+	 * 结果用户把滑条推到 2.0 也只觉得"余响多了点"、隔墙该多闷还是多闷。
+	 * 现在它同时乘"遮挡陡度 k"与"发送增益"，一个旋钮就能整体变强/变弱。
 	 */
 	public float physicsSoundLevel = 1.0f;
+	/**
+	 * 遮挡陡度 k（默认 <b>4.5</b>，范围 2.0~9.0）：{@code 直通截止 = exp(-遮挡累积 x k)}。
+	 * <p>这个数只管"隔墙有多闷"，是用户优先级最高的一条链路：
+	 * <ul>
+	 *   <li>一层石头墙（遮挡累积 1.0）→ 4.5 时截止 ≈ <b>0.011</b>（约 -39 dB 高频，明显发闷）</li>
+	 *   <li>同一面墙在 1.0 时截止 ≈ 0.37（约 -8.6 dB，只是"稍微暗一点"）</li>
+	 * </ul>
+	 * 0.12.5 是写死的 3.0。
+	 */
+	public float physicsAbsorption = 4.5f;
+	/**
+	 * 需要几条"通透通路"才算真的漏音（默认 <b>3</b>，范围 1~9）。
+	 * <p>非严格模式下，除了"唱片机 → 耳朵"那条主射线，还会试两个端点各偏移 ±1 格的 8 条平行射线。
+	 * <ul>
+	 *   <li>0.12.5 的做法是<b>取最小值</b> —— 一条缝就命中 0，遮挡被抹平，效果全没（"有些场景听不出来"）。</li>
+	 *   <li>0.12.6 改成<b>数通路</b>：{@code 放宽 = 85% × min(1, 通路数 / 本值)}，
+	 *       且最多只能把遮挡降到原值的 15%。所以 1~2 条缝只放宽一点，3 条以上才明显变通透。</li>
+	 * </ul>
+	 * 调大 = 更不容易透（更像"严格遮挡"）；调小到 1 = 接近 0.12.5 的老行为。
+	 */
+	public int physicsOcclusionPaths = 3;
 	/**
 	 * 精度：混响射线数（默认 32）。
 	 * <p>越大越准、越贵。主线程预算约 1ms/次评估（每 4 刻评估一次），
 	 * 32 条 x 最多 4 次反弹 ≈ 128 次 raycast。
 	 */
 	public int physicsRays = 32;
-	/** 调试日志：每 10 秒打一行遮挡/截止/发送增益/耗时（默认关，排障时开）。 */
+	/**
+	 * 调试日志：每 10 秒打一行遮挡/截止/发送增益/耗时，外加
+	 * <b>材质探针</b>（每轮评估真正命中的方块 → 遮挡/反射率/吸声 + 来源分类，
+	 * 去重、每轮最多 6 条、最多 1 秒一次）与开局一次的<b>材质表自检</b>（默认关，排障时开）。
+	 */
 	public boolean physicsSoundDebug = false;
 	/**
 	 * 严格遮挡（默认关）。
@@ -253,6 +285,9 @@ public final class CloudDiscConfig {
 			jukeboxVolume = 1.0f;
 			outputGain = 1.0f;
 		}
+		// v5（0.12.6）新增 physicsAbsorption / physicsOcclusionPaths，且改写了 physicsSoundLevel 的语义。
+		// 两个新字段的 Java 默认值就是想要的默认值（Gson 对缺失字段保留 Java 初始值），所以不需要迁移逻辑；
+		// 只是把文件重写一遍，让新键出现在用户的 clouddisc.json 里，方便手改。
 		configVersion = CURRENT_VERSION;
 	}
 

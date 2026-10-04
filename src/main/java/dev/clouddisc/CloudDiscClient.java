@@ -45,8 +45,9 @@ public final class CloudDiscClient implements ClientModInitializer {
 		sync.init();
 		// 物理声效的总开关：把配置里的值同步给声学模块（同时也用于 DSP 兜底路径的判断）
 		dev.clouddisc.audio.Acoustics.setEnabled(config.physicsSound);
-		LOGGER.info("[CloudDisc] 物理声效: 总开关={} 强度={} 射线数={} 严格遮挡={} 方向性={} 调试日志={}",
-				config.physicsSound, config.physicsSoundLevel, config.physicsRays,
+		LOGGER.info("[CloudDisc] 物理声效: 总开关={} 强度={} 隔墙闷度k={} 漏音通路数={} 射线数={} 严格遮挡={} 方向性={} 调试日志={}",
+				config.physicsSound, config.physicsSoundLevel, config.physicsAbsorption,
+				config.physicsOcclusionPaths, config.physicsRays,
 				config.physicsStrictOcclusion, config.physicsSoundDirection, config.physicsSoundDebug);
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {

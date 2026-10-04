@@ -6,6 +6,175 @@
 
 ---
 
+## 0.12.6
+
+**物理声效调参 + 材质探针（M7）：让"隔墙变闷"明显到一耳朵能听出来**
+
+用户反馈（0.12.5 实测）：**效果确实有 ✓，但"没那么激进，有些场景听不出来" ✗**。
+本轮只调参 + 加诊断：**没有新增/删除 mixin，没有改 EFX 架构，没有改调用链**。
+
+### 根因（两条，都能在代码里指出来）
+
+1. **开阔度修正在最后一步把遮挡顶了回去**（0.12.5 `Acoustics.java` 原第 378 行）：
+   ```java
+   cutoffWithShared = max(sqrt(avgShared) * 0.2f, cutoffNoAir);
+   ```
+   这一条没有门槛。站在开阔房间隔一层石头墙时 `avgShared ≈ 0.9` →
+   下限 `sqrt(0.9)*0.2 = 0.194`，而石头墙自己算出来的是 `exp(-1.0*3) = 0.0498`
+   → 被 `max` 顶到 **0.194**。这正是用户描述的"只稍微暗一点（0.2~0.3）"。
+   数值对照（`occ=1.0`）：`0.0498`（该有的）vs `0.194`（实际下发的）。
+2. **8 条偏移射线"取最小值"**：只要有一条缝没被挡，`occ → 0` → `cutoff → 1.0`
+   → 低通滤波器等于没挂。这就是"有些场景完全听不出来"。
+
+第 3 条已知偏差（不是根因，但会放大上面的问题）：`gain = cutoff^0.1`，
+`0.0498^0.1 = 0.741` → 隔墙后总音量只掉 2.5 dB，用户感知到的"闷"几乎全来自高频那一段。
+
+### 改了什么（旧值 → 新值，逐条）
+
+| 项 | 旧 | 新 | 位置 |
+|---|---|---|---|
+| 遮挡陡度 k（`exp(-occ*k)`） | 3.0（写死） | **4.5**（配置 `physicsAbsorption`，2.0~9.0） | `Acoustics` `ABSORPTION_DEFAULT` / `absorption()` |
+| 开阔度修正门槛 | 无门槛 | `OPENNESS_GATE_OCC = 0.6`：遮挡 ≥0.6 时修正一律失效 | `Acoustics.OPENNESS_GATE_OCC` |
+| 截止下限 | 0.02 | **0.005** | `Acoustics.MIN_DIRECT_CUTOFF` |
+| 直通增益指数 | `cutoff^0.1` | **`cutoff^0.2`** | `Acoustics.DIRECT_GAIN_EXP` |
+| 偏移射线规则 | 8 条取最小值 | **数通路**：`放宽 = 0.85 × min(1, 通路数/需要数)` | `Acoustics.MAX_RELAX` / `physicsOcclusionPaths` |
+| 需要通路数 | 1（等价于任意一条即可） | **3**（配置 `physicsOcclusionPaths`，1~9） | `Acoustics.DEFAULT_OPEN_PATHS` |
+| 石头反射率 | 0.52 | **0.60** | `BlockAcoustics` STONE 档 |
+| 木板遮挡 / 反射率 | 0.82 / 0.45 | **0.55 / 0.30** | `BlockAcoustics` WOOD 档 |
+| 沙土遮挡 | 0.75 | 0.70 | `BlockAcoustics` SAND 档 |
+| 幽匿遮挡 | 0.65 | 0.55 | SCULK 档 |
+| 黏液遮挡 | 0.60 | 0.50 | SLIME 档 |
+| 树叶遮挡 | 0.35 | 0.30 | GRASS 档 |
+| 兜底反射率（未识别材质/射线未命中） | 0.40 | **0.60** | `BlockAcoustics.DEFAULT` + `Acoustics` 两处兜底 |
+| 混响发送基准 | ×1.0 | **×1.6** | `Acoustics.SEND_BOOST` |
+| 衰减时间系数 / 下限 / 上限 | 0.25 / 0.25 / 4.0 | **0.40 / 0.45 / 6.0** | `Acoustics` `baseDecay` |
+| reflectionsGain | `0.20+0.45r` | `0.25+0.55r` | `traceReverb` |
+| lateReverbGain | `0.35+0.45r` | `0.40+0.55r` | `traceReverb` |
+| EAXReverb 整体 gain | 0.24 | **0.32** | `traceReverb` + `EfxEngine.Reverb` |
+| `EfxEngine.Reverb` 默认值 | 0.28/1.2/0.3/0.5 | 0.32/1.6/0.4/0.65 | `EfxEngine.Reverb` |
+| `physicsSoundLevel` 语义 | 只乘发送增益 | **同时乘"遮挡陡度 k"与"发送增益"**；0 = 等同关闭（不做射线、干净直通） | `Acoustics.evaluate` |
+| 配置版本 | 4 | **5**（新键自动补进 `clouddisc.json`，无需迁移逻辑） | `CloudDiscConfig.CURRENT_VERSION` |
+
+**为什么木板是 0.82 → 0.55**：用户要求"玻璃/木板/石头三档能明确分辨"。
+在 `exp(-occ*4.5)` 下，0.82 与 1.00 分别给出 0.025 / 0.011 —— 都在 -32 dB 以下，
+人耳几乎听不出差别（都"死闷"）。改成 0.55 后三档分别是
+**玻璃 0.407 / 木板 0.084 / 石头 0.011**（约 -8 / -21 / -39 dB 高频），落在三个可分辨的区间。
+
+### ① 材质探针（运行时取证，这是新加的东西）
+
+- `BlockAcoustics` 的每条材质档现在带一个**来源标签**（`Params.source()`，第 4 个分量），
+  例如 `声音组 STONE(石头)`、`声音组 GLASS(玻璃/水晶)｜非不透明方块(遮挡×0.8)`、
+  `默认值（未识别的声音组）`。
+- `BlockAcoustics.probeLine(state, world, pos)` 把它拼成一行：
+  `<方块注册名> → 遮挡=x 反射率=x 吸声=x（来源=…）`。
+- `Acoustics.occlusionAt` 的 DDA 回调里调用 `noteProbe(...)`，**只记录真正参与了遮挡累加的方块**
+  （空气、无碰撞体积的草/火把不会进来）；按注册名去重，每轮最多收集 24 条。
+- `Acoustics.flushProbe(nowTick)` 在每轮评估末尾打出**最多 6 条**，且限频
+  `PROBE_INTERVAL_TICKS = 20`（1 秒）—— 评估是 5Hz，不限频会一秒刷 30 行反而看不清。
+  时间戳初值用 `Long.MIN_VALUE / 2`（教训 1）；探针失败整个包在 try/catch 里（教训 4 的"先取证"）。
+  仅当 `physicsSoundDebug=true` 时收集，关掉时 `noteProbe` 只多一次 `if`。
+- `Acoustics.dumpMaterialTableOnce(world)`：调试开着时，开局打一次**材质表自检**
+  （`BlockAcoustics.sampleTable`，20 种常见方块，含来源标签）—— **不依赖任何射线命中**，
+  是最快的一条证据。
+
+### ② 静态自检（我真跑了的，不是推论）
+
+对**重映射后的 1.20.1 yarn 客户端 jar** 跑 `javap`：
+
+```
+BlockSoundGroup 字段总数(javap, 1.20.1 yarn build.10): 103
+BlockAcoustics 引用的字段数: 103
+引用了但在 1.20.1 里不存在的字段: （无）
+1.20.1 存在但材质表完全没引用的声音组（会掉进兜底默认值）: 0 个
+未覆写 equals/hashCode → == 就是引用恒等比较，单例匹配可靠 ✓
+public net.minecraft.sound.BlockSoundGroup getSoundGroup();                        (AbstractBlock$AbstractBlockState)
+public boolean isOpaqueFullCube(net.minecraft.world.BlockView, net.minecraft.util.math.BlockPos);
+```
+
+结论：**材质表覆盖了 1.20.1 的全部 103 个原版声音组，一个都没漏**；
+所以 0.12.5 那个"退到近石质默认值"的失败模式**不可能是"名字取不到/漏了某一组"**，
+只可能是 `getSoundGroup()` 抛异常（`derive` 里被 catch → `g = null` → DEFAULT）
+或别的 mod 注册了自定义声音组。**这两种情况材质探针都会明确打出来源=默认值。**
+（本轮没有在游戏里跑过，所以"运行时到底命中哪一组"仍以探针日志为准。）
+
+### ③ 验证状态（诚实）
+
+- **实测**：`gradlew build` 通过（唯一 warning 是 0.12.5 就存在的
+  `SoundEngineMixin` 的 `@At(INVOKE)` 映射告警，与本轮无关）；jar 已装机到两个实例；
+  上面的 javap 静态自检；下面"数值对照"是我用 PowerShell 按公式算出来的（等于代码逻辑）。
+- **推论**：所有听感结论 —— 我没有跑游戏的能力，**必须由用户实测**。
+- **未验证**：`physicsSoundLevel=2.0` 时遮挡陡度 9.0 会不会"闷到听不清唱什么"；
+  木板 0.55 是否偏亮。这两个都在"对照表"里留了旋钮。
+
+### 数值对照（`tools/AcousticsMath.java` 实跑输出，非实测听感）
+
+`java tools/AcousticsMath.java`（纯公式，不依赖 Minecraft）实跑结果，代表场景 `avgShared = 0.9`：
+
+```
+== 0.12.6 (new defaults: k=4.5, gate, gain^0.2, floor 0.005) ==
+scene                         occ     GAINHF    HF dB       GAIN  gain dB
+no blocker                   0.00     1.0000      0.0      1.000      0.0
+1x glass (0.12.6 table)      0.20     0.4066     -7.8      0.835     -1.6
+1x wood plank                0.55     0.0842    -21.5      0.610     -4.3
+1x stone                     1.00     0.0111    -39.1      0.407     -7.8
+2x stone (stacked)           2.00     0.0050    -46.0      0.165    -15.6
+1x deepslate                 1.00     0.0111    -39.1      0.407     -7.8
+
+== 0.12.5 (old: k=3.0, no gate, gain^0.1, floor 0.02) ==
+1x glass                     0.20     0.5488     -5.2      0.942     -0.5
+1x wood plank                0.55     0.1920    -14.3      0.848     -1.4
+1x stone                     1.00     0.1897    -14.4      0.847     -1.4
+2x stone (stacked)           2.00     0.1897    -14.4      0.847     -1.4
+
+== why 0.12.5 felt weak: 1x stone wall ==
+  raw exp(-1.0*3.0)            = 0.0498  (-26.1 dB) <- what physics says
+  after unconditional openness = 0.1897  (-14.4 dB) <- what was actually sent
+  0.12.6 sends                 = 0.0111  (-39.1 dB)
+```
+
+**这张表里最值得看的两行**：
+1. 0.12.5 里"1x stone / 2x stone / 1x deepslate"的截止**全是 0.1897** ——
+   不光是"只掉 14 dB"，而是**厚墙与薄墙、石头与深板岩完全没有区别**（全被那个下限吃掉了）。
+2. 0.12.6 里三档材质拉开成 **0.4066 / 0.0842 / 0.0111**（玻璃/木板 差 13.7 dB，木板/石头 差 17.6 dB），
+   而且"两层石头"能继续掉到下限 0.005（-46 dB），厚薄可分辨。
+
+（`gain` 一列由 `cutoffWithShared^0.2` 算出，用的<b>不是</b>被下限截断后的截止，
+所以"两层石头"的 GAIN 能继续掉到 0.165 而 GAINHF 已经贴在下限 0.005。这是有意的：
+总音量还能继续表达"更厚"，高频只负责"很闷"这一档。）
+
+**听感仍然没有被验证** —— 上表只证明"公式会下发这些数"，不代表耳朵一定听得出；
+`physicsSoundLevel=2.0` 时石头墙后 GAIN 0.165（-15.6 dB）会不会"闷到听不清唱什么"，
+以及木板 0.55 是否偏亮，这两个都在"对照表"里留了旋钮。
+
+### 诚实记录：这条改动的副作用（"开阔度修正"对直通已经不再生效）
+
+加了门槛 + 把 k 提到 4.5 之后，逐点算下来
+`0.2*sqrt(0.9)*(1-occ/0.6)` **永远赢不过** `exp(-occ*4.5)`：
+
+```
+occ=0.05  floor=0.1897  cutoffNoAir=0.7985  -> 遮挡赢
+occ=0.20  floor=0.1897  cutoffNoAir=0.4066  -> 遮挡赢
+occ=0.37  floor=0.0000  cutoffNoAir=0.1892  -> 遮挡赢（且下限已归零）
+occ=0.60  floor=0.0000  cutoffNoAir=0.0672  -> 遮挡赢
+```
+
+也就是说：**"同一片开阔空间里声音能绕过来 → 直通不该被压死"这条机制，对直通截止实际上停用了。**
+- 这是<b>有意的</b>：用户明确要求"先保证隔墙变闷这条链路有强效果"，而这条机制正是把
+  隔一层石头墙从 0.05 顶回 0.19 的元凶。
+- 代码形状（`max(floor, cutoffNoAir)`）保留着：把 `k` 调回 2~3 或把 `OPENNESS_FLOOR_COEF` 调大，
+  它就会重新起作用（`physicsAbsorption` 已经做成配置，所以用户能自己试出来）。
+- 它<b>并没有整体消失</b>：`SharedAirspace` 仍然在混响那侧用着 ——
+  `w0..w3`（4 个延迟带各自的权重）与 `openness`（DSP 兜底路径的 room/decay）都还是它算的。
+  所以"开阔空间尾巴长、小房间短促"这条听感不受影响。
+
+### 安全 / 兼容
+
+- 所有新代码都在原有的 `try/catch` 与"只作用于我们自己的声源"前提下工作，**EFX 架构与调用链没动**。
+- EFX 不可用时仍然永久回退 DSP；`physicsSoundLevel=0` 现在直接跳过射线（等价关闭 + 省性能）。
+- 新增两个配置键；老配置由 Gson 补 Java 默认值（4.5 / 3），配置版本 4 → 5 只触发一次文件重写。
+
+---
+
 ## 0.12.5 / 0.12.4 / 0.12.3 / 0.12.2 / 0.12.1
 
 **唱片机物理声效：从自研 PCM DSP 换成 OpenAL EFX（M2→M6），DSP 保留为自动兜底**
