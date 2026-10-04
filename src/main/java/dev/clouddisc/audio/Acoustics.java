@@ -955,8 +955,11 @@ public final class Acoustics {
 			// 【0.12.27】排除唱片机自身及其紧邻 3×3×3：
 			// 射线终点带 ±0.4 偏移，否则会打到"唱片机旁的墙/脚下底座/头顶方块"，
 			// 于是"把唱片机垫高 4 格、人站在正下方"也会被判成被挡（实测反直觉）。
-			if (skip != null && Math.abs(x - skip.getX()) <= 1 && Math.abs(y - skip.getY()) <= 1
-					&& Math.abs(z - skip.getZ()) <= 1) {
+			// 【0.12.41】只忽略"正上方/正下方"那一格（唱片机的底座 / 天花），
+			// 不再忽略水平相邻的方块 —— 原来排除整个 3×3×3 时，
+			// **贴墙放置的唱片机旁边那堵墙正好落在里面** → 8 条偏移射线全都看不见它
+			// → 被挡占比≈0 → 遮挡被 ^1.5 削成 0（实测：挪离墙一格就正常 ✓）。
+			if (skip != null && x == skip.getX() && z == skip.getZ() && Math.abs(y - skip.getY()) <= 1) {
 				return true;
 			}
 			if (skip != null && p.equals(skip)) {
