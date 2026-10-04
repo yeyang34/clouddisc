@@ -472,7 +472,12 @@ public final class Acoustics {
 			// 只要 spaceGate > 0（说明声源或听者处于封闭空间），就必须采用【主射线】的遮挡：
 			// 否则"室内贴墙放唱片机、人站在室外某个角度"时，8 条偏移射线会从墙边绕过去，
 			// 把整面墙的遮挡削到 8%（实测 bug：特定范围完全不变闷）。
-			occ = occMain;
+			// 【0.12.40】改用【被挡射线占比】的幂次做软衰减 —— 这才是"一格方块 vs 一堵墙"的真正区别：
+			//   一格方块 / 树干  → 只挡住少数射线（占比 ~0.1）→ 0.1^1.5≈0.03 → 几乎不闷 ✓
+			//   整堵墙 / 封闭小屋 → 挡住全部射线（占比 1.0）→ 完整物理 ✓
+			// （0.12.27 那版是"1 - 占比"直接线性，太狠；0.12.32 的空间闸门又会把露天一堵墙清零 ✗）
+			double fracBlocked = 1.0 - (openPaths / 8.0);
+			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
 			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
 			//   · 双方都在开阔空间 → 遮挡 ×0.15（树后几乎不闷）
@@ -480,7 +485,7 @@ public final class Acoustics {
 			//   · 声源被封闭（小屋/矿洞里的唱片机）→ ×1.0（完整物理，门开/门关照旧生效）
 			float gate = spaceGate(world, ear, center);
 			st.lastSpaceGate = gate;
-			occ *= gate;
+			occ *= 1.0f; // 【0.12.40】空间闸门停用：露天一堵墙也会被它清零 ✗。gate 仍计算并记录，可用日志观察
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
