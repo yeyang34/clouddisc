@@ -94,6 +94,7 @@ public class CloudDiscConfigScreen extends Screen {
 
 	@Override
 	protected void init() {
+		computeLayout();
 		clearChildren();
 		labels.clear();
 
@@ -130,7 +131,7 @@ public class CloudDiscConfigScreen extends Screen {
 			cfg.save();
 			CloudDiscClient.LOGGER.info("[CloudDisc] 配置已保存到磁盘");
 			close();
-		}).dimensions(this.width / 2 + 1, y, 76, 20).build();
+		}).dimensions(bx + 2 * (bw + 4), y, bw, 20).build();
 		save.visible = !textSection; // 只读页没有可保存的东西
 		addDrawableChild(save);
 
