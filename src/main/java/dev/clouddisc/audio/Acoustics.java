@@ -1,0 +1,947 @@
+package dev.clouddisc.audio;
+
+import dev.clouddisc.CloudDiscClient;
+import dev.clouddisc.CloudDiscConfig;
+import dev.clouddisc.mixin.SoundSystemAccessor;
+import dev.clouddisc.mixin.SourceAccessor;
+import dev.clouddisc.mixin.SourceManagerAccessor;
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.sound.Channel;
+import net.minecraft.client.sound.SoundInstance;
+import net.minecraft.client.sound.SoundSystem;
+import net.minecraft.client.sound.Source;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
+import org.lwjgl.openal.AL10;
+
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+/**
+ * 唱片机的"物理声效"—— 思路参考 Sound Physics Remastered（只借鉴机制与公式形状，代码全部自写，本项目 MIT）。
+ *
+ * <h2>两层结构</h2>
+ * <ol>
+ *   <li><b>采集 + 参数层（主线程，每 tick）</b>：射线算出"遮挡 / 混响"，做按时间的平滑，
+ *       然后<b>每个刻</b>把参数写进声源。</li>
+ *   <li><b>应用层</b>：
+ *     <ul>
+ *       <li>首选 {@link EfxEngine}：OpenAL EFX 的直通低通 + 混响辅助发送。<b>延迟只跟 tick 有关</b>。</li>
+ *       <li>EFX 不可用 → 自动回退到本类自研的 PCM DSP（{@link #filterMono}），
+ *           出声永远优先于效果。</li>
+ *     </ul>
+ *   </li>
+ * </ol>
+ *
+ * <h2>为什么以前慢半拍</h2>
+ * 旧实现只在 PCM 上做一阶低通，而每个 PCM 块约 4096 样本 ≈ 85ms，外加引擎预队列几秒
+ * —— 参数"跟着音频块走"，所以拆了墙还闷好几秒。现在参数直接进 OpenAL 声源，
+ * 引擎下一个混音块就生效。
+ *
+ * <h2>状态按声源分开</h2>
+ * 多个唱片机同时播放时，各自的平滑状态/评估结果互相独立（{@link #STATES} 以 OpenAL source id 为键）。
+ */
+public final class Acoustics {
+	// ---------------------------------------------------------------- 调参常量
+	/** 遮挡射线评估的间隔（tick）：4 刻 = 5Hz。参数层仍然每 tick 平滑+下发。 */
+	private static final int INTERVAL_TICKS = 4;
+	/** 参数层的收敛时间（秒）——按时间算，不按调用次数。 */
+	private static final float SMOOTH_SECONDS = 0.15f;
+	/** 与 SPR 的 blockAbsorption(=1.0) x 3.0 同义：遮挡累积值 → exp(-occ*3)。 */
+	private static final float ABSORPTION = 3.0f;
+	private static final double AIR_START = 12.0;
+	/** 沿连线最多穿过多少格（性能上限）。
+	 * <p>注意这是"<b>格子数</b>"不是"格数"：斜射一条 20 格的线最多会穿过 3x20 个格子，
+	 * 所以这里给得比最大听距更宽松，避免"远处的墙没算进来"这种静默错误。 */
+	private static final int MAX_OCC_STEPS = 96;
+	/** 遮挡累积值上限：再厚的墙也不会更闷（否则一个 10 格厚的地基会把增益压到听不见）。 */
+	private static final double MAX_OCC = 3.0;
+	/** 诊断日志间隔（tick）：200 刻 = 10 秒。 */
+	private static final long LOG_INTERVAL_TICKS = 200L;
+
+	/** DSP 回退路径用的截止频率映射区间（Hz）。 */
+	private static final float MIN_CUTOFF_HZ = 450.0f;
+	private static final float MAX_CUTOFF_HZ = 20000.0f;
+
+	private static volatile boolean enabled = true;
+
+	// ---------------------------------------------------------------- 声源捕获
+	private static volatile boolean nextIsOurs = false;
+	private static volatile boolean pendingOurs = false;
+	private static volatile int lastSourceId = 0;
+	private static volatile long lastSourceTick = Long.MIN_VALUE / 2;
+	private static volatile SoundSystem soundSystem;
+
+	// ---------------------------------------------------------------- 每个声源的平滑状态
+	private static final class State {
+		float directCutoff = 1.0f;
+		float directGain = 1.0f;
+		final float[] sendGain = new float[EfxEngine.MAX_BANDS];
+		final float[] sendCutoff = new float[EfxEngine.MAX_BANDS];
+		// 目标值（射线评估的结果）
+		float tDirectCutoff = 1.0f;
+		float tDirectGain = 1.0f;
+		final float[] tSendGain = new float[EfxEngine.MAX_BANDS];
+		final float[] tSendCutoff = new float[EfxEngine.MAX_BANDS];
+		long lastEvalTick = Long.MIN_VALUE / 2;
+		long lastTick = Long.MIN_VALUE / 2;
+		long lastLogTick = Long.MIN_VALUE / 2;
+		/** 最近一次射线评估的耗时（纳秒），用于日志里的性能证据。 */
+		long evalNanos;
+		/** 沿连线累加出来的遮挡值（诊断用，也是日志里的关键数字）。 */
+		float occlusionAcc;
+		/** 开阔度 0..1（M4 起由"共享空气空间"算出）。 */
+		float openness = 1.0f;
+		/** 想要写进 EAXReverb 的参数，以及"已经写进去的"（用来做变化阈值判定）。 */
+		final EfxEngine.Reverb[] reverb = {new EfxEngine.Reverb(), new EfxEngine.Reverb(),
+				new EfxEngine.Reverb(), new EfxEngine.Reverb()};
+		final EfxEngine.Reverb[] appliedReverb = {new EfxEngine.Reverb(), new EfxEngine.Reverb(),
+				new EfxEngine.Reverb(), new EfxEngine.Reverb()};
+		boolean reverbDirty;
+		/** 诊断用：最近一次评估测到的平均反射率 / 平均自由程 / 逐层反射率。 */
+		float lastAvgReflectivity;
+		float lastAvgFreePath;
+		final float[] lastBandRefl = new float[REVERB_BOUNCES];
+		/** M6：目标 / 平滑后的声源位置（未偏移时就是唱片机中心）。 */
+		double tPosX;
+		double tPosY;
+		double tPosZ;
+		double posX;
+		double posY;
+		double posZ;
+		boolean posSeeded;
+		/** 诊断：当前是否在水下。 */
+		boolean underwater;
+		boolean seeded = false;
+	}
+
+	private static final Map<Integer, State> STATES = new HashMap<>();
+	/** DSP 回退路径当前跟随的状态（最后一个被评估的声源）。 */
+	private static volatile State dspState = new State();
+
+	private Acoustics() {
+	}
+
+	public static boolean isActive() {
+		State s = dspState;
+		return enabled && s != null && (s.directCutoff < 0.999f || s.sendGain[0] > 0.002f);
+	}
+
+	// ---- 物理声效 · 第 1 步：捕获我们自己声源的 OpenAL id ----
+
+	/** 引擎每次 play 声音时告知"这是不是我们的实例"。 */
+	public static void markNextOwnSource(boolean ours) {
+		nextIsOurs = ours;
+	}
+
+	/** 把声音系统实例记下来，供"按声音实例精确反查 source id"用。 */
+	public static void noteSoundSystem(SoundSystem ss) {
+		soundSystem = ss;
+	}
+
+	/** 声源真正 play() 时来领：如果刚才标记的是我们的实例，就认领并捕获 id。 */
+	public static boolean consumePendingOwnSource() {
+		if (!nextIsOurs) {
+			return false;
+		}
+		nextIsOurs = false;
+		pendingOurs = true;
+		return true;
+	}
+
+	/** 捕获到声源 id（兜底路径；首选路径是按声音实例反查，见 {@link #resolveSourceId}）。 */
+	public static void attachSource(int sourceId) {
+		lastSourceId = sourceId;
+		lastSourceTick = currentTick();
+		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效: 捕获到声源 id={}（EFX {}）", sourceId, EfxEngine.status());
+	}
+
+	public static int lastSourceId() {
+		return lastSourceId;
+	}
+
+	public static void setEnabled(boolean value) {
+		enabled = value;
+		if (!value) {
+			reset();
+		}
+	}
+
+	public static void reset() {
+		synchronized (STATES) {
+			STATES.clear();
+		}
+		dspState = new State();
+		smoothCutoffHz = -1.0f;
+		lpState = 0.0f;
+	}
+
+	/**
+	 * 精确反查：我们的 {@link SoundInstance} → 引擎里那条声源的 OpenAL id。
+	 *
+	 * @return 0 表示暂时拿不到（声源还没建好 / 已经停掉），调用方应跳过本轮
+	 */
+	private static int resolveSourceId(SoundInstance instance) {
+		SoundSystem ss = soundSystem;
+		if (ss == null || instance == null) {
+			return 0;
+		}
+		try {
+			Map<SoundInstance, Channel.SourceManager> map = ((SoundSystemAccessor) ss).clouddisc$sources();
+			if (map == null) {
+				return 0;
+			}
+			Channel.SourceManager sm = map.get(instance);
+			if (sm == null) {
+				return 0;
+			}
+			Source src = ((SourceManagerAccessor) sm).clouddisc$source();
+			if (src == null) {
+				return 0;
+			}
+			return ((SourceAccessor) src).clouddisc$pointer();
+		} catch (Throwable t) {
+			return 0;
+		}
+	}
+
+	private static long currentTick() {
+		World w = MinecraftClient.getInstance().world;
+		return w == null ? 0L : w.getTime();
+	}
+
+	// ---------------------------------------------------------------- 每 tick 主入口
+
+	/**
+	 * 每刻调用（每个正在播放的会话各一次）。
+	 *
+	 * @param jukebox  唱片机坐标
+	 * @param instance 我们自己那条声音实例（用于精确反查 source id）
+	 * @param nowTick  当前游戏刻
+	 */
+	public static void tick(BlockPos jukebox, SoundInstance instance, long nowTick) {
+		if (!enabled || jukebox == null) {
+			return;
+		}
+		try {
+			if (!EfxEngine.isAvailable()) {
+				EfxEngine.ensureInit(nowTick);
+			}
+			MinecraftClient mc = MinecraftClient.getInstance();
+			World world = mc.world;
+			Entity self = mc.player;
+			if (world == null || self == null) {
+				return;
+			}
+
+			int sourceId = resolveSourceId(instance);
+			if (sourceId == 0) {
+				// 兜底：声源刚 play 时捕获到的 id（只在捕获后 40 刻内有效，避免对已回收的 id 乱写）
+				if (nowTick - lastSourceTick <= 40L) {
+					sourceId = lastSourceId;
+				}
+			}
+			if (sourceId == 0) {
+				return; // 还没有真正的声源：什么都不做（绝不去猜一个 id）
+			}
+
+			State st = stateFor(sourceId);
+
+			// ① 采集（限频）
+			if (!st.seeded || nowTick - st.lastEvalTick >= INTERVAL_TICKS) {
+				st.lastEvalTick = nowTick;
+				long t0 = System.nanoTime();
+				evaluate(world, self, jukebox, st);
+				st.evalNanos = System.nanoTime() - t0;
+				st.seeded = true;
+			}
+
+			// ② 参数层：按时间平滑（这一步是"延迟只跟 tick 有关"的关键）
+			smooth(st, nowTick);
+
+			// ③ 应用层
+			Vec3d center = centerOf(jukebox);
+			if (directionEnabled()) {
+				applyPosition(sourceId, st, center.x, center.y, center.z);
+			}
+			if (EfxEngine.isAvailable()) {
+				syncReverb(st);
+				EfxEngine.applyToSource(sourceId, st.directCutoff, st.directGain, st.sendGain, st.sendCutoff);
+				dspState = null; // EFX 生效时不碰 DSP
+			} else {
+				dspState = st;   // 回退：把参数交给 filterMono
+			}
+
+			// ④ 诊断日志
+			logDiagnostics(st, sourceId, nowTick, world, self, jukebox);
+		} catch (Throwable t) {
+			// 声学出错绝不影响播放
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 物理声效: tick 异常（已忽略，播放不受影响）: {}", t.toString());
+		}
+	}
+
+	private static State stateFor(int sourceId) {
+		synchronized (STATES) {
+			State s = STATES.get(sourceId);
+			if (s == null) {
+				s = new State();
+				STATES.put(sourceId, s);
+				// 简单清理：表太大时丢掉最老的（正常只会有 1~2 个）
+				if (STATES.size() > 8) {
+					STATES.clear();
+					STATES.put(sourceId, s);
+				}
+			}
+			return s;
+		}
+	}
+
+	// ---------------------------------------------------------------- 采集层（射线）
+
+	/**
+	 * M3 采集：<b>沿"唱片机 → 听者耳朵"的连线逐格累加材质遮挡值</b>（不再数"挡没挡"）。
+	 *
+	 * <p>要点：
+	 * <ul>
+	 *   <li>遮挡值来自 {@link BlockAcoustics}（自己按方块声音组 + 完整方块 + 硬度 + 液体推导）。</li>
+	 *   <li>非严格模式：再把两个端点各偏移 ±1 格的 8 个对角点都算一遍，<b>取最小值</b>
+	 *       —— 一条缝、一个门洞就该让遮挡降下来。</li>
+	 *   <li>{@code cutoff = exp(-遮挡累积 x 3.0)}、{@code gain = cutoff^0.1}（与 SPR 同形）。</li>
+	 * </ul>
+	 */
+	private static void evaluate(World world, Entity self, BlockPos jukebox, State st) {
+		Vec3d ear = earOf(self);
+		Vec3d center = centerOf(jukebox);
+		double dist = ear.distanceTo(center);
+
+		double occ = occlusionAt(world, center, ear, jukebox);
+		if (!strictOcclusion() && occ > 0.0) {
+			// 只要主射线被挡就试 8 个对角偏移；主射线本来就通透时最小值必然是 0，不用白算
+			outer:
+			for (int sx = -1; sx <= 1; sx += 2) {
+				for (int sy = -1; sy <= 1; sy += 2) {
+					for (int sz = -1; sz <= 1; sz += 2) {
+						Vec3d off = new Vec3d(sx, sy, sz);
+						occ = Math.min(occ, occlusionAt(world, center.add(off), ear.add(off), jukebox));
+						if (occ <= 0.0) {
+							break outer;
+						}
+					}
+				}
+			}
+		}
+
+		float cutoffNoAir = (float) Math.exp(-occ * ABSORPTION);
+		st.occlusionAcc = (float) occ;
+
+		// ---- 混响射线（M4/M5）：从唱片机按黄金角球面均匀发射，每条最多 4 次反弹 ----
+		ReverbResult rr = traceReverb(world, center, ear, jukebox, occ);
+		float avgShared = rr.sharedAirspaceWeight;
+		st.openness = occ <= 0.0 ? 1.0f : avgShared;
+
+		// 开阔度修正：同一片开阔空间里，声音能从别处绕过来 → 直通不该被压得太死
+		// （对应 SPR 的 directCutoff = max(sqrt(averageSharedAirspace)*0.2, directCutoff)）
+		float cutoffWithShared = Math.max((float) (Math.sqrt(Math.max(0.0f, avgShared)) * 0.2f), cutoffNoAir);
+		float gain = (float) Math.pow(cutoffWithShared, 0.1);
+		// 空气吸收：按距离衰减高频（"远处高频先没"）。只压高频，不压总增益
+		// —— 总增益本来就有 OpenAL 的距离衰减在管。
+		float air = (float) Math.pow(0.9, Math.max(0.0, (dist - AIR_START) / 3.0));
+		float cutoff = Math.max(0.02f, cutoffWithShared * air);
+
+		// ---- M6 水下：直通再乘 0.1，混响发送也一起变闷 ----
+		boolean underwater = false;
+		try {
+			underwater = self.isSubmergedInWater();
+		} catch (Throwable ignored) {
+			// 取不到就当不在水下
+		}
+		st.underwater = underwater;
+		if (underwater) {
+			gain *= 0.1f;
+			cutoff *= 0.3f;
+		}
+
+		st.tDirectCutoff = clamp01(cutoff);
+		st.tDirectGain = clamp01(gain);
+
+		// ---- M6 方向性：把声源位置沿"反射来向"偏移（到听者的距离不变，所以音量不变） ----
+		st.tPosX = center.x;
+		st.tPosY = center.y;
+		st.tPosZ = center.z;
+		if (directionEnabled() && occ > 0.0 && rr.hasDirection) {
+			double len = Math.sqrt(rr.dirX * rr.dirX + rr.dirY * rr.dirY + rr.dirZ * rr.dirZ);
+			if (len >= 0.5) {
+				double ux = rr.dirX / len;
+				double uy = rr.dirY / len;
+				double uz = rr.dirZ / len;
+				double d = center.distanceTo(ear);
+				st.tPosX = ear.x + ux * d;
+				st.tPosY = ear.y + uy * d;
+				st.tPosZ = ear.z + uz * d;
+			}
+		}
+
+		// ---- 混响发送：M5 起 4 个延迟带各走一个 aux slot ----
+		fillSends(st, rr, soundLevel());
+		if (underwater) {
+			for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
+				st.tSendCutoff[i] = clamp01(st.tSendCutoff[i] * 0.4f);
+			}
+		}
+		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
+			copyReverb(rr.reverb[i], st.reverb[i]);
+		}
+		st.reverbDirty = true;
+		st.lastAvgReflectivity = (float) rr.avgReflectivity;
+		st.lastAvgFreePath = (float) rr.avgFreePath;
+		System.arraycopy(rr.bandRefl, 0, st.lastBandRefl, 0, REVERB_BOUNCES);
+	}
+
+	/**
+	 * 把 4 个延迟带的能量变成 4 条"发送增益 + 发送截止"。
+	 *
+	 * <p>按计划做三件事：
+	 * <ol>
+	 *   <li><b>逐层反射率幂次修正</b>：第 2 层 × 反射率、第 3 层 × 反射率³、第 4 层 × 反射率⁴
+	 *       —— 越晚的带经过的反射越多，所以对"墙面吸不吸声"越敏感。吸声的房间里尾巴就短。</li>
+	 *   <li><b>距离衰减</b>：离得越远混响越少（见 {@link #REVERB_FADE_DISTANCE}）。</li>
+	 *   <li><b>强度系数</b>（{@code physicsSoundLevel}）+ 末端 {@code clamp(0,1)}。</li>
+	 * </ol>
+	 * <p>晚带再加一个很小的死区（低于 3% 直接归零），避免一直挂着一层听不清但费运算的嘶声。
+	 */
+	private static void fillSends(State st, ReverbResult rr, float level) {
+		float[] g = new float[EfxEngine.MAX_BANDS];
+		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
+			g[i] = rr.bandGain[i];
+		}
+		if (rr.bandRefl.length > 1) {
+			g[1] *= rr.bandRefl[1];
+		}
+		if (rr.bandRefl.length > 2) {
+			g[2] *= (float) Math.pow(rr.bandRefl[2], 3.0);
+		}
+		if (rr.bandRefl.length > 3) {
+			g[3] *= (float) Math.pow(rr.bandRefl[3], 4.0);
+		}
+		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
+			float v = clamp01(g[i] * rr.distanceFactor * level);
+			if (i >= 2) {
+				v = clamp01((v - 0.03f) / 0.97f);
+			}
+			st.tSendGain[i] = v;
+			st.tSendCutoff[i] = clamp01(rr.sendCutoff[i]);
+		}
+		// 可用段数少于 4（ALC_MAX_AUXILIARY_SENDS=2，或根本没 EFX）时，
+		// 把第 3/4 段折回前面的段，别把能量丢掉。DSP 兜底只有 1 条混响链路，所以 b=1。
+		int b = EfxEngine.isAvailable() ? Math.max(1, Math.min(EfxEngine.bands(), EfxEngine.MAX_BANDS)) : 1;
+		if (b < EfxEngine.MAX_BANDS) {
+			for (int i = b; i < EfxEngine.MAX_BANDS; i++) {
+				st.tSendGain[i % b] += st.tSendGain[i];
+				st.tSendGain[i] = 0.0f;
+			}
+			for (int i = 0; i < b; i++) {
+				st.tSendGain[i] = clamp01(st.tSendGain[i]);
+			}
+		}
+	}
+
+	private static void copyReverb(EfxEngine.Reverb from, EfxEngine.Reverb to) {
+		to.gain = from.gain;
+		to.gainHF = from.gainHF;
+		to.decayTime = from.decayTime;
+		to.decayHFRatio = from.decayHFRatio;
+		to.reflectionsGain = from.reflectionsGain;
+		to.lateReverbGain = from.lateReverbGain;
+		to.lateReverbDelay = from.lateReverbDelay;
+		to.density = from.density;
+		to.diffusion = from.diffusion;
+		to.airAbsorptionGainHF = from.airAbsorptionGainHF;
+	}
+
+	private static boolean reverbDiffers(EfxEngine.Reverb a, EfxEngine.Reverb b) {
+		final float e = 0.02f;
+		return Math.abs(a.gain - b.gain) > e
+				|| Math.abs(a.gainHF - b.gainHF) > e
+				|| Math.abs(a.decayTime - b.decayTime) > 0.05f
+				|| Math.abs(a.decayHFRatio - b.decayHFRatio) > e
+				|| Math.abs(a.reflectionsGain - b.reflectionsGain) > e
+				|| Math.abs(a.lateReverbGain - b.lateReverbGain) > e
+				|| Math.abs(a.lateReverbDelay - b.lateReverbDelay) > 0.005f
+				|| Math.abs(a.density - b.density) > e
+				|| Math.abs(a.diffusion - b.diffusion) > e
+				|| Math.abs(a.airAbsorptionGainHF - b.airAbsorptionGainHF) > 0.005f;
+	}
+
+	/** 把 EAXReverb 参数按需灌进效果器（只有变化超过阈值才写，避免每 tick 重设造成杂音/开销）。 */
+	private static void syncReverb(State st) {
+		if (!EfxEngine.isAvailable() || !st.reverbDirty) {
+			return;
+		}
+		st.reverbDirty = false;
+		int n = Math.min(EfxEngine.bands(), EfxEngine.MAX_BANDS);
+		for (int i = 0; i < n; i++) {
+			if (reverbDiffers(st.reverb[i], st.appliedReverb[i])) {
+				EfxEngine.setReverb(i, st.reverb[i]);
+				copyReverb(st.reverb[i], st.appliedReverb[i]);
+			}
+		}
+	}
+	// ------------------------------------------------------------ 混响射线（M4/M5）
+
+	private static final double GOLDEN_ANGLE = Math.PI * (3.0 - Math.sqrt(5.0));
+	private static final int REVERB_BOUNCES = 4;
+	private static final double REVERB_MAX_DISTANCE = 48.0;
+	/** 每条反射射线最多穿过多少格（斜射要按 √3 倍放宽：48 格的斜线约 83 格）。 */
+	private static final int MAX_REVERB_STEPS = 96;
+	private static final int MAX_CLEAR_LINE_STEPS = 64;
+	/** 计划里的 0.12：反射路径长度 → 感知延迟的换算系数。 */
+	private static final float REVERB_DELAY_FACTOR = 0.12f;
+	/** 4 个延迟带的能量权重。 */
+	private static final float[] BAND_WEIGHT = {6.4f, 12.8f, 12.8f, 12.8f};
+	/** 距离衰减：混响发送在这么远之外完全消失。 */
+	private static final float REVERB_FADE_DISTANCE = 48.0f;
+	/** 每次评估最多做多少次"命中点 → 耳朵通不通"的测试（只在被挡时做）。 */
+	private static final int MAX_CLEAR_LINE_TESTS = 48;
+
+	private static final class ReverbResult {
+		final float[] bandGain = new float[4];
+		final float[] sendCutoff = new float[4];
+		/** 逐层平均反射率（第 i 次反弹的平均反射率）。 */
+		final float[] bandRefl = new float[REVERB_BOUNCES];
+		float sharedAirspaceWeight;
+		float distanceFactor = 1.0f;
+		double avgReflectivity = 0.4;
+		double avgFreePath = 4.0;
+		/** M6 方向性：反射来向的加权和（未归一化）。 */
+		double dirX;
+		double dirY;
+		double dirZ;
+		boolean hasDirection;
+		final EfxEngine.Reverb[] reverb = {new EfxEngine.Reverb(), new EfxEngine.Reverb(),
+				new EfxEngine.Reverb(), new EfxEngine.Reverb()};
+	}
+
+	private static ReverbResult traceReverb(World world, Vec3d center, Vec3d ear, BlockPos jukebox, double occ) {
+		ReverbResult out = new ReverbResult();
+		int numRays = rays();
+		float rcpTotalRays = 1.0f / (numRays * (float) REVERB_BOUNCES);
+		float[] bandRefl = new float[REVERB_BOUNCES];
+		double reflSum = 0.0;
+		int reflCount = 0;
+		double freePathSum = 0.0;
+		int freePathCount = 0;
+		int sharedAirspaces = 0;
+		int clearLineTests = 0;
+
+		// 同一坐标每轮都用同一组方向（确定性），但按坐标旋转一下，避免所有唱片机方向图案一模一样
+		double theta0 = ((jukebox.getX() * 31L + jukebox.getY() * 17L + jukebox.getZ() * 13L) & 0xFFFF) / 65535.0 * (Math.PI * 2.0);
+
+		for (int i = 0; i < numRays; i++) {
+			// 黄金角球面均匀分布（Fibonacci sphere）：不需要随机数，覆盖面均匀
+			double yy = 1.0 - 2.0 * (i + 0.5) / numRays;
+			double rr = Math.sqrt(Math.max(0.0, 1.0 - yy * yy));
+			double th = theta0 + GOLDEN_ANGLE * i;
+			Vec3d dir = new Vec3d(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
+			Vec3d origin = center;
+			double totalDist = 0.0;
+
+			for (int b = 0; b < REVERB_BOUNCES; b++) {
+				Vec3d end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
+				RayWalk.Hit hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
+				if (hit == null) {
+					// 这条射线跑到头了（等于跑进了开阔空间）：把"到听者的剩余距离"也算进路程
+					totalDist += origin.distanceTo(ear);
+					break;
+				}
+				double seg = hit.t * REVERB_MAX_DISTANCE;
+				totalDist += seg;
+				BlockState bs = safeState(world, hit.pos);
+				float refl = bs == null ? 0.4f : BlockAcoustics.reflectivityOf(bs);
+				bandRefl[b] += refl;
+				reflSum += refl;
+				reflCount++;
+				freePathSum += seg;
+				freePathCount++;
+
+				// 反射延迟 → 三角权重落进 4 个延迟带
+				float reflectionDelay = (float) (totalDist * REVERB_DELAY_FACTOR * refl);
+				float energy = 0.25f * (refl * 0.75f + 0.25f);
+				float c0 = 1.0f - clamp(Math.abs(reflectionDelay), 0.0f, 1.0f);
+				float c1 = 1.0f - clamp(Math.abs(reflectionDelay - 1.0f), 0.0f, 1.0f);
+				float c2 = 1.0f - clamp(Math.abs(reflectionDelay - 2.0f), 0.0f, 1.0f);
+				float c3 = clamp(reflectionDelay - 2.0f, 0.0f, 1.0f);
+				out.bandGain[0] += c0 * energy * BAND_WEIGHT[0] * rcpTotalRays;
+				out.bandGain[1] += c1 * energy * BAND_WEIGHT[1] * rcpTotalRays;
+				out.bandGain[2] += c2 * energy * BAND_WEIGHT[2] * rcpTotalRays;
+				out.bandGain[3] += c3 * energy * BAND_WEIGHT[3] * rcpTotalRays;
+
+				// 共享空气空间：从这个命中点能不能"直线看到"听者。
+				// 只在直通被挡时才算 —— 直通通透时 openness 本来就是 1，没必要花这个钱。
+				if (occ > 0.0 && clearLineTests < MAX_CLEAR_LINE_TESTS) {
+					clearLineTests++;
+					Vec3d hp = hit.point().add(hit.normal().multiply(0.002));
+					if (RayWalk.cast(world, hp, ear, MAX_CLEAR_LINE_STEPS) == null) {
+						sharedAirspaces++;
+						Vec3d d = ear.subtract(hp);
+						double len = d.length();
+						if (len > 0.5) {
+							double w = 1.0 / (len * len);
+							out.dirX += d.x / len * w;
+							out.dirY += d.y / len * w;
+							out.dirZ += d.z / len * w;
+							out.hasDirection = true;
+						}
+					}
+				}
+
+				dir = reflect(dir, hit.normal());
+				origin = hit.point().add(hit.normal().multiply(0.002));
+			}
+		}
+
+		// 逐层反射率（M5 用它做幂次修正：越晚的反弹对反射率越敏感）
+		for (int i = 0; i < REVERB_BOUNCES; i++) {
+			out.bandRefl[i] = bandRefl[i] / (float) numRays;
+		}
+		out.avgReflectivity = reflCount == 0 ? 0.4 : reflSum / reflCount;
+		out.avgFreePath = freePathCount == 0 ? 4.0 : freePathSum / freePathCount;
+
+		// 共享空气空间 → 4 个延迟带各自的权重（越晚的带越容易被"绕过来的声音"填满）
+		float sharedAirspace = sharedAirspaces * 64.0f * rcpTotalRays;
+		float w0 = clamp(sharedAirspace / 20.0f, 0.0f, 1.0f);
+		float w1 = clamp(sharedAirspace / 15.0f, 0.0f, 1.0f);
+		float w2 = clamp(sharedAirspace / 10.0f, 0.0f, 1.0f);
+		float w3 = clamp(sharedAirspace / 10.0f, 0.0f, 1.0f);
+		out.sharedAirspaceWeight = (w0 + w1 + w2 + w3) * 0.25f;
+
+		float occCut = (float) Math.exp(-occ * ABSORPTION);
+		out.sendCutoff[0] = occCut * (1.0f - w0) + w0;
+		out.sendCutoff[1] = occCut * (1.0f - w1) + w1;
+		out.sendCutoff[2] = occCut * (1.0f - w2) + w2;
+		out.sendCutoff[3] = occCut * (1.0f - w3) + w3;
+
+		// 距离衰减：离得越远，混响越少（否则整个地图都在响同一份余响）
+		double dist = ear.distanceTo(center);
+		out.distanceFactor = (float) Math.max(0.0, 1.0 - Math.min(dist / REVERB_FADE_DISTANCE, 1.0));
+
+		// 由"平均自由程 / 反射率"推每个延迟带的 EAXReverb 参数（数值自己定，不抄 SPR 的预设表）
+		double baseDecay = clampD(0.25 * out.avgFreePath, 0.25, 4.0);
+		for (int i = 0; i < 4; i++) {
+			EfxEngine.Reverb p = out.reverb[i];
+			p.decayTime = (float) clampD(baseDecay * (0.7 + 0.5 * i), 0.15, 12.0);
+			p.gainHF = (float) clampD(0.35 + 0.65 * out.avgReflectivity, 0.15, 1.0);
+			p.reflectionsGain = (float) clampD(0.20 + 0.45 * out.avgReflectivity, 0.05, 0.85);
+			p.lateReverbGain = (float) clampD(0.35 + 0.45 * out.avgReflectivity, 0.10, 0.90);
+			p.lateReverbDelay = 0.012f + 0.012f * i;
+			p.decayHFRatio = (float) clampD(0.45 + 0.35 * out.avgReflectivity, 0.2, 0.95);
+			p.gain = 0.24f;
+		}
+		return out;
+	}
+
+	private static BlockState safeState(World world, BlockPos p) {
+		try {
+			return world.getBlockState(p);
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	/** 镜面反射：{@code dir - 2 (dir·n) n}。 */
+	private static Vec3d reflect(Vec3d dir, Vec3d normal) {
+		double dot = dir.dotProduct(normal) * 2.0;
+		return new Vec3d(dir.x - dot * normal.x, dir.y - dot * normal.y, dir.z - dot * normal.z);
+	}
+
+	private static int rays() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		int n = cfg == null ? 32 : cfg.physicsRays;
+		return Math.max(8, Math.min(128, n));
+	}
+
+	private static float soundLevel() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		float v = cfg == null ? 1.0f : cfg.physicsSoundLevel;
+		return Math.max(0.0f, Math.min(2.0f, v));
+	}
+
+	private static float clamp(float v, float lo, float hi) {
+		return v < lo ? lo : (v > hi ? hi : v);
+	}
+
+	private static double clampD(double v, double lo, double hi) {
+		return v < lo ? lo : (v > hi ? hi : v);
+	}
+
+	/** 沿 from → to 逐格累加材质遮挡值。 */
+	private static double occlusionAt(World world, Vec3d from, Vec3d to, BlockPos skip) {
+		final double[] acc = {0.0};
+		RayWalk.walk(from.x, from.y, from.z, to.x, to.y, to.z, MAX_OCC_STEPS, (x, y, z, t, nx, ny, nz) -> {
+			BlockPos p = new BlockPos(x, y, z);
+			if (skip != null && p.equals(skip)) {
+				return true;
+			}
+			BlockState bs;
+			try {
+				bs = world.getBlockState(p);
+			} catch (Throwable e) {
+				return false;
+			}
+			if (bs.isAir()) {
+				return true;
+			}
+			boolean fluid = false;
+			try {
+				fluid = !bs.getFluidState().isEmpty();
+			} catch (Throwable ignored) {
+				// 取不到就当不是流体
+			}
+			if (!fluid) {
+				try {
+					if (bs.getCollisionShape(world, p).isEmpty()) {
+						return true; // 草/火把/藤蔓这类没有碰撞体积的东西不算遮挡
+					}
+				} catch (Throwable e) {
+					return true;
+				}
+			}
+			acc[0] += BlockAcoustics.occlusionOf(bs, world, p);
+			return acc[0] < MAX_OCC;
+		});
+		return Math.min(acc[0], MAX_OCC);
+	}
+
+	private static boolean strictOcclusion() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		return cfg != null && cfg.physicsStrictOcclusion;
+	}
+
+	private static boolean directionEnabled() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		return cfg != null && cfg.physicsSoundDirection;
+	}
+
+	private static Vec3d earOf(Entity self) {
+		return new Vec3d(self.getX(), self.getEyeY(), self.getZ());
+	}
+
+	private static Vec3d centerOf(BlockPos jukebox) {
+		return new Vec3d(jukebox.getX() + 0.5, jukebox.getY() + 0.6, jukebox.getZ() + 0.5);
+	}
+
+	// ---------------------------------------------------------------- 参数层（按时间平滑）
+
+	private static void smooth(State st, long nowTick) {
+		long dt = nowTick - st.lastTick;
+		// 【教训 1】带时间戳的限频代码，初值必须是 Long.MIN_VALUE/2，否则减法溢出 → 永远 return。
+		// 这里再加一道保险：dt 不合理（<=0 或过大）时按 1 刻处理。
+		if (dt <= 0L || dt > 100L) {
+			dt = 1L;
+		}
+		st.lastTick = nowTick;
+		// 【教训 2】平滑系数必须按时间算（1 - exp(-dt/tau)），不能按调用次数。
+		float k = (float) (1.0 - Math.exp(-(dt / 20.0) / SMOOTH_SECONDS));
+		st.directCutoff += (st.tDirectCutoff - st.directCutoff) * k;
+		st.directGain += (st.tDirectGain - st.directGain) * k;
+		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
+			st.sendGain[i] += (st.tSendGain[i] - st.sendGain[i]) * k;
+			st.sendCutoff[i] += (st.tSendCutoff[i] - st.sendCutoff[i]) * k;
+		}
+		if (!st.posSeeded) {
+			st.posSeeded = true;
+			st.posX = st.tPosX;
+			st.posY = st.tPosY;
+			st.posZ = st.tPosZ;
+		} else {
+			st.posX += (st.tPosX - st.posX) * k;
+			st.posY += (st.tPosY - st.posY) * k;
+			st.posZ += (st.tPosZ - st.posZ) * k;
+		}
+	}
+
+	/**
+	 * M6 方向性：把平滑后的声源位置写回 OpenAL（纯 AL 调用，与 EFX 是否可用无关）。
+	 * <p>只在"真的偏移了"的时候写，避免每 tick 覆盖原版设置。
+	 */
+	private static void applyPosition(int sourceId, State st, double centerX, double centerY, double centerZ) {
+		if (!st.posSeeded) {
+			return;
+		}
+		double dx = st.posX - centerX;
+		double dy = st.posY - centerY;
+		double dz = st.posZ - centerZ;
+		if (dx * dx + dy * dy + dz * dz < 0.01) {
+			return; // 没偏移：保持原版给的位置
+		}
+		try {
+			AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) st.posX, (float) st.posY, (float) st.posZ);
+		} catch (Throwable t) {
+			// 位置偏移失败不影响播放
+		}
+	}
+
+	// ---------------------------------------------------------------- 诊断
+
+	private static void logDiagnostics(State st, int sourceId, long nowTick, World world, Entity self, BlockPos jukebox) {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		boolean debug = cfg != null && cfg.physicsSoundDebug;
+		// 平时每 10 秒一行；调试模式下每 1 秒一行（方便边拆墙边看数值变化）
+		long interval = debug ? 20L : LOG_INTERVAL_TICKS;
+		if (nowTick - st.lastLogTick < interval) {
+			return;
+		}
+		st.lastLogTick = nowTick;
+		Vec3d ear = earOf(self);
+		double dist = ear.distanceTo(centerOf(jukebox));
+		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M6]: source={} EFX={} 遮挡累积={} 直通截止={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
+						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格",
+				sourceId,
+				EfxEngine.isAvailable() ? "可用(" + EfxEngine.bands() + "段)" : "不可用→DSP",
+				fmt(st.occlusionAcc), fmt(st.directCutoff), fmt(st.directGain), fmt(st.openness),
+				fmt1(dist), st.underwater, fmt1(offsetOf(st, jukebox)), fmt3(st.evalNanos / 1.0e6),
+				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath));
+	}
+
+	private static double offsetOf(State st, BlockPos jukebox) {
+		if (!st.posSeeded) {
+			return 0.0;
+		}
+		Vec3d c = centerOf(jukebox);
+		return Math.sqrt((st.posX - c.x) * (st.posX - c.x) + (st.posY - c.y) * (st.posY - c.y) + (st.posZ - c.z) * (st.posZ - c.z));
+	}
+
+	private static String fmt(float v) {
+		return String.format(Locale.ROOT, "%.3f", v);
+	}
+
+	private static String fmt1(double v) {
+		return String.format(Locale.ROOT, "%.1f", v);
+	}
+
+	private static String fmt3(double v) {
+		return String.format(Locale.ROOT, "%.3f", v);
+	}
+
+	private static String arr(float[] a) {
+		StringBuilder sb = new StringBuilder("[");
+		int n = Math.min(a.length, Math.max(1, EfxEngine.bands() == 0 ? a.length : EfxEngine.bands()));
+		for (int i = 0; i < n; i++) {
+			if (i > 0) {
+				sb.append(", ");
+			}
+			sb.append(fmt(a[i]));
+		}
+		return sb.append(']').toString();
+	}
+
+	private static float clamp01(float v) {
+		return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+	}
+
+	// ================================================================ DSP 回退路径
+	// 下面是 0.10~0.12 那套自研 PCM DSP（一阶低通 + 玩具 Schroeder 混响）。
+	// 它<b>只在 EFX 不可用时</b>才工作；不删，保证"任何设备上都有声效可用"。
+
+	private static float smoothCutoffHz = -1.0f;
+	private static float lpState = 0.0f;
+
+	private static final float[] COMB_SECONDS = {0.0297f, 0.0371f, 0.0411f, 0.0437f};
+	private static final float[] ALLPASS_SECONDS = {0.0050f, 0.0017f};
+	private static float[][] combBuf;
+	private static int[] combIdx;
+	private static float[] combOut;
+	private static float[][] apBuf;
+	private static int[] apIdx;
+	private static float preparedRate = 0.0f;
+
+	/** 对一段单声道、归一化样本做处理：直通低通 + 增益 + 混响。EFX 可用时一个样本都不碰。 */
+	public static void filterMono(float[] buf, int offset, int frames, float sampleRate) {
+		if (EfxEngine.isAvailable() || !isActive() || sampleRate <= 0.0f) {
+			if (smoothCutoffHz != -1.0f) {
+				smoothCutoffHz = -1.0f;
+				lpState = 0.0f;
+			}
+			return;
+		}
+		State st = dspState;
+		if (st == null) {
+			return;
+		}
+		prepareReverb(sampleRate);
+
+		float directCutoff = st.directCutoff;
+		float targetHz = (float) (MAX_CUTOFF_HZ * Math.pow(MIN_CUTOFF_HZ / MAX_CUTOFF_HZ, 1.0f - directCutoff));
+		// 平滑按时间收敛（1 - exp(-块时长/tau)），不按块数。
+		float k = (float) (1.0 - Math.exp(-(double) frames / (SMOOTH_SECONDS * sampleRate)));
+		if (smoothCutoffHz < 0.0f) {
+			smoothCutoffHz = targetHz;
+		} else {
+			smoothCutoffHz += (targetHz - smoothCutoffHz) * k;
+		}
+		float a = (float) (1.0 - Math.exp(-2.0 * Math.PI * smoothCutoffHz / sampleRate));
+		float gain = st.directGain;
+		float wet = st.sendGain[0];
+		float room = 0.6f + 0.9f * st.openness;
+		float decay = 0.35f + 0.55f * room;
+		float feedback = (float) Math.pow(0.001, 1.0 / Math.max(1.0, decay * sampleRate / 1000.0 * 1.5));
+
+		float y = lpState;
+		for (int i = 0; i < frames; i++) {
+			float dry = buf[offset + i] * gain;
+			y += a * (dry - y);
+			float out = y;
+			if (wet > 0.001f) {
+				out += reverbSample(y, feedback) * wet;
+			}
+			buf[offset + i] = out;
+		}
+		lpState = y;
+	}
+
+	/** Schroeder：4 个并联梳状（带反馈）+ 2 个串联全通。 */
+	private static float reverbSample(float x, float feedback) {
+		float sum = 0.0f;
+		for (int c = 0; c < COMB_SECONDS.length; c++) {
+			float[] b = combBuf[c];
+			int idx = combIdx[c];
+			float delayed = b[idx];
+			combOut[c] = delayed;
+			b[idx] = x + delayed * feedback;
+			combIdx[c] = (idx + 1) % b.length;
+			sum += delayed;
+		}
+		float v = sum * 0.25f;
+		for (int p = 0; p < ALLPASS_SECONDS.length; p++) {
+			float[] b = apBuf[p];
+			int idx = apIdx[p];
+			float delayed = b[idx];
+			float out = -v + delayed;
+			b[idx] = v + delayed * 0.5f;
+			apIdx[p] = (idx + 1) % b.length;
+			v = out;
+		}
+		return v;
+	}
+
+	private static void prepareReverb(float sampleRate) {
+		if (preparedRate == sampleRate && combBuf != null) {
+			return;
+		}
+		preparedRate = sampleRate;
+		combBuf = new float[COMB_SECONDS.length][];
+		combIdx = new int[COMB_SECONDS.length];
+		combOut = new float[COMB_SECONDS.length];
+		for (int i = 0; i < COMB_SECONDS.length; i++) {
+			combBuf[i] = new float[Math.max(16, (int) (COMB_SECONDS[i] * sampleRate))];
+		}
+		apBuf = new float[ALLPASS_SECONDS.length][];
+		apIdx = new int[ALLPASS_SECONDS.length];
+		for (int i = 0; i < ALLPASS_SECONDS.length; i++) {
+			apBuf[i] = new float[Math.max(8, (int) (ALLPASS_SECONDS[i] * sampleRate))];
+		}
+	}
+}

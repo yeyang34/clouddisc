@@ -446,6 +446,11 @@ public final class PlaybackController {
 		// 诊断：起播 1 秒 / 5 秒后各打一次"声音引擎到底有没有把我们的音频取走"。
 		// 这是判断"真的没声音"最直接的一行：playedMs 一直是 0 = MC 根本没在消费
 		// （说明这条声音被拒绝/被停掉了），而不是"音量太小"。
+		// 唱片机物理声效：**每个正在播放的会话**每刻都评估一次（射线采集按 4 刻限频，
+		// 但"平滑 + 写进 OpenAL 声源"是**每刻**都做的 → 参数延迟只跟 tick 有关，
+		// 不再跟着音频块（约 85ms/块）走。传 s.instance 是为了按声音实例精确反查 source id。
+		// 之前插在"发起方心跳块"里 → 跟随方（就是听的人）永远不评估 → 隔墙毫无变化。
+		dev.clouddisc.audio.Acoustics.tick(s.pos(), s.instance, nowTick);
 		long sinceStart = nowTick - s.startedTick;
 		if (sinceStart >= 20L && !s.consumptionLogged1s) {
 			s.consumptionLogged1s = true;
@@ -496,6 +501,7 @@ public final class PlaybackController {
 			// pumpBuffers(4)，MC 的 OpenAL 队列一开始就压了约 4 秒 —— 它比真正在响的位置
 			// 超前约 4 秒。实测两边日志里那个稳定的 "差 -4000ms" 就是这么来的（并非真的差 4 秒）。
 			long contentMs = s.msAtStart + (nowTick - s.startedTick) * 50L;
+
 			announcer.announceHeartbeat(s, contentMs, nowTick);
 		}
 		// 【0.8.2】被原版提前掐掉之后，由我们自己按真实时长收尾：放到真正的结尾才停。

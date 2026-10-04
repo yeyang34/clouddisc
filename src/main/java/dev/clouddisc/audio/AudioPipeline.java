@@ -229,6 +229,9 @@ public final class AudioPipeline implements AutoCloseable {
 					// 日志里峰值打出 32230 这种不可能的数字）。
 					buf[len + f] = sum / (float) inChannels / 32768.0f;
 				}
+				// 唱片机物理声效：按遮挡度对这一段（已下混、已归一化）做低通
+				// —— 隔墙变闷、远处高频先没。完全通畅时 isActive() 为假，不碰任何样本。
+				Acoustics.filterMono(buf, len, frames, inRate);
 				len += frames;
 			}
 		} catch (IOException e) {

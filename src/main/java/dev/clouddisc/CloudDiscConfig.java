@@ -24,7 +24,7 @@ public final class CloudDiscConfig {
 	 * 新版本把默认值改成 true 之后，老用户仍然读到 false，表现为"功能像没实现"。
 	 * 有了版本号就能在老配置上做一次迁移。
 	 */
-	public static final int CURRENT_VERSION = 3;
+	public static final int CURRENT_VERSION = 4;
 
 	private static CloudDiscConfig instance;
 
@@ -107,6 +107,39 @@ public final class CloudDiscConfig {
 	 * <p>这是跨公网最省事的一条通道：不刷聊天、不受服务器插件影响，而且能携带完整音频地址。
 	 */
 	public boolean enableServerRelay = true;
+
+	// ---- 物理声效（纯客户端，只作用于我们自己的声源） ----
+	/**
+	 * 物理声效总开关（默认开）。
+	 * <p>关掉之后：不挂 EFX、不做射线、也不做 PCM DSP —— 就是"干净的直通"，用来 A/B 对比。
+	 */
+	public boolean physicsSound = true;
+	/**
+	 * 强度（0.0 ~ 2.0，默认 1.0）：混响发送增益的整体倍率。
+	 * <p>遮挡造成的闷响不受它影响（那是"物理事实"），它只调"余响有多湿"。
+	 */
+	public float physicsSoundLevel = 1.0f;
+	/**
+	 * 精度：混响射线数（默认 32）。
+	 * <p>越大越准、越贵。主线程预算约 1ms/次评估（每 4 刻评估一次），
+	 * 32 条 x 最多 4 次反弹 ≈ 128 次 raycast。
+	 */
+	public int physicsRays = 32;
+	/** 调试日志：每 10 秒打一行遮挡/截止/发送增益/耗时（默认关，排障时开）。 */
+	public boolean physicsSoundDebug = false;
+	/**
+	 * 严格遮挡（默认关）。
+	 * <p>开：只听"唱片机 → 耳朵"这一条线，墙上有缝也当墙。
+	 * <p>关（推荐）：再把两个端点各偏移 ±1 格的 8 个对角点算一遍取最小值 ——
+	 * 门缝、窗缝、拐角能让声音明显透过来，这更接近真实听感。
+	 */
+	public boolean physicsStrictOcclusion = false;
+	/**
+	 * 方向性（默认开）。
+	 * <p>直通被挡住时，把声源位置沿"反射来向"偏移（<b>到听者的距离保持不变</b>，
+	 * 所以不会造成音量突变），听感就是"声音从拐角/走廊那头绕过来"，而不是从墙里穿过来。
+	 */
+	public boolean physicsSoundDirection = true;
 
 	/** 是否允许聊天通道作为兜底信令/数据通道。 */
 	public boolean enableChatRelay = true;

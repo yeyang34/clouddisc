@@ -6,7 +6,13 @@
 	"client": [
 		"ChatHudMixin",
 		"ClientWorldMixin",
-		"SoundLoaderMixin"
+		"SoundEngineMixin",
+		"SoundLoaderMixin",
+		"SoundSystemAccessor",
+		"SoundSystemMixin",
+		"SourceAccessor",
+		"SourceManagerAccessor",
+		"SourceMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

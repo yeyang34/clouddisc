@@ -25,7 +25,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
- * CloudDisc 配置界面（4 节：播放 / 网络与音源 / 教程 / 更新日志）。
+ * CloudDisc 配置界面（5 节：播放 / 物理声效 / 网络与音源 / 教程 / 更新日志）。
  *
  * <p><b>设计原则：零硬依赖。</b>只用原版控件（{@link ButtonWidget} / {@link TextFieldWidget}），
  * 所以没装 Cloth Config / YACL / ModMenu 也照样能打开。
@@ -37,11 +37,12 @@ import java.util.function.Supplier;
  */
 public class CloudDiscConfigScreen extends Screen {
 	private static final int SECTION_PLAYBACK = 0;
-	private static final int SECTION_NETWORK = 1;
-	private static final int SECTION_GUIDE = 2;
-	private static final int SECTION_CHANGELOG = 3;
-	private static final int SECTION_COUNT = 4;
-	private static final String[] SECTION_NAMES = {"播放设置", "网络与音源", "使用教程", "更新日志"};
+	private static final int SECTION_PHYSICS = 1;
+	private static final int SECTION_NETWORK = 2;
+	private static final int SECTION_GUIDE = 3;
+	private static final int SECTION_CHANGELOG = 4;
+	private static final int SECTION_COUNT = 5;
+	private static final String[] SECTION_NAMES = {"播放设置", "物理声效", "网络与音源", "使用教程", "更新日志"};
 
 	private static final int ROWS = 7;
 	private static final int ROW_START = 48;
@@ -84,6 +85,8 @@ public class CloudDiscConfigScreen extends Screen {
 			textLines = List.of();
 			if (section == SECTION_PLAYBACK) {
 				pagePlayback();
+			} else if (section == SECTION_PHYSICS) {
+				pagePhysics();
 			} else {
 				pageNetwork();
 			}
@@ -132,7 +135,35 @@ public class CloudDiscConfigScreen extends Screen {
 				() -> cfg.cacheMaxMb, v -> cfg.cacheMaxMb = v));
 	}
 
-	// ------------------------------------------------------- 第 2 节：网络与音源
+	// ------------------------------------------------------- 第 2 节：物理声效
+
+	/**
+	 * 物理声效页（纯客户端：只作用于我们自己的那条声源，原版唱片与其它声音完全不受影响）。
+	 *
+	 * <p>三组开关对应计划里的"总开关 / 强度 / 精度"，另外三个是排障用的：
+	 * 严格遮挡、方向性、调试日志。
+	 */
+	private void pagePhysics() {
+		row(0, "物理声效总开关（关=干净直通，用于对比）", toggle(0, () -> cfg.physicsSound, v -> {
+			cfg.physicsSound = v;
+			dev.clouddisc.audio.Acoustics.setEnabled(v);
+		}));
+		row(1, "强度（混响发送倍率，0.5 更含蓄）", cycleFloat(1, new float[] {0.0f, 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f},
+				() -> cfg.physicsSoundLevel, v -> cfg.physicsSoundLevel = (float) v));
+		row(2, "精度·混响射线数（越大越准越贵）", cycleInt(2, new int[] {16, 24, 32, 48, 64},
+				() -> cfg.physicsRays, v -> cfg.physicsRays = v));
+		row(3, "严格遮挡（开=墙上小缝也算墙）", toggle(3, () -> cfg.physicsStrictOcclusion, v -> cfg.physicsStrictOcclusion = v));
+		row(4, "方向性（声音从拐角绕过来）", toggle(4, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
+		row(5, "调试日志（每 10 秒一行数值）", toggle(5, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
+		// 第 6 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
+		int y = ROW_START + 6 * ROW_STEP + 6;
+		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
+				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
+				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
+		labels.add(new Label(Text.literal("状态: " + efx), this.width / 2 + LABEL_X_OFFSET, y));
+	}
+
+	// ------------------------------------------------------- 第 3 节：网络与音源
 
 	private void pageNetwork() {
 		row(0, "UDP 端口（⚠重启生效；双开请不同）", textField(0, String.valueOf(cfg.udpPort), v -> {

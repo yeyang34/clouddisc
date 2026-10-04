@@ -6,6 +6,150 @@
 
 ---
 
+## 0.12.5 / 0.12.4 / 0.12.3 / 0.12.2 / 0.12.1
+
+**唱片机物理声效：从自研 PCM DSP 换成 OpenAL EFX（M2→M6），DSP 保留为自动兜底**
+
+### 为什么必须换（上一版的根因）
+
+`0.10~0.12.0` 那套是在**自己的 PCM** 上做一阶低通 + 玩具 Schroeder 混响，而
+`AudioPipeline` 每块约 4096 样本 ≈ 85ms，再叠加引擎预队列（`pumpBuffers(4)` ≈ 4 秒）：
+参数"跟着音频块走" → 实测"拆了墙还闷好几秒"。另外那套只看"16 条射线挡没挡"，
+没有材质、没有反射、没有方向 —— 上限就在那里。
+
+新做法与 SPR 同层：把参数写进**引擎里那条 OpenAL 声源**
+（`AL_DIRECT_FILTER` 低通 + `AL_AUXILIARY_SEND_FILTER` 到带 EAXReverb 的 aux slot），
+由驱动在混音时应用 → **延迟只跟 tick 有关**。
+
+### M2 —— EFX 基础设施 + 直通低通每刻写入（0.12.1）
+
+- **挂点**（用 `javap` 核对过 yarn 名）：SPR 用的 Mojang 名
+  `SoundEngine#loadLibrary` 里 `Listener#reset()` 那一句，在 yarn 1.20.1 里是
+  `SoundSystem#start` 里 `SoundListener#init()`。
+  `javap -c net.minecraft.client.sound.SoundSystem` 反汇编确认：`SoundEngine.init(...)`
+  （建上下文）之后**紧接着**就是这一句 → 注入时 ALC 上下文已 current。
+  refmap 解析结果：`start → class_1140;method_4846()V`、
+  `Lnet/minecraft/client/sound/SoundListener;init()V → class_4227;method_19673()V` ✓
+- **EFX 资源**（`EfxEngine.init`）：`alcIsExtensionPresent(device,"ALC_EXT_EFX")` 为假 → 打日志 +
+  **永久回退 DSP**；否则建 `min(4, ALC_MAX_AUXILIARY_SENDS)` 个 aux slot + EAXReverb + 低通滤波器。
+  常量全部用 LWJGL 具名常量（`EXTEfx.*` / `AL10` / `AL11`），无魔数。
+- **每刻写入**：`AL_LOWPASS_GAIN/GAINHF` + `AL_DIRECT_FILTER`；同时把
+  `AL_DIRECT_FILTER_GAINHF_AUTO` / `AL_AUXILIARY_SEND_FILTER_GAIN_AUTO` / `..._GAINHF_AUTO`
+  置 false，保证"写进去的值就是最终值"。变化小于 0.008 就不重写（省 AL 调用）。
+- **声源识别（硬红线：绝不误伤别人的声音）**：不再只靠"最近一次 Source#play 捕获的 id"，
+  而是通过三个 accessor 精确反查：
+  `SoundSystem.sources`（`field_18950`）→ `Channel.SourceManager.source`（`field_18941`）→
+  `Source.pointer`（`field_18893`，与 SPR 的 ChannelAccessor 同一个字段）。
+  拿不到就**什么都不做**（绝不去猜一个 id）；只有刚捕获 40 刻内才允许用兜底 id。
+- **ALC 属性**：写了 `SoundEngineMixin`（`@Redirect` 掉 `alcCreateContext`）请求
+  `ALC_MAX_AUXILIARY_SENDS = 4`。**这是量出来的，不是猜的** —— 独立 LWJGL 探针（不经 Minecraft，
+  直接 `alcOpenDevice` + `alcCreateContext`）实测：
+  ```
+  ctx(default)             → ALC_MAX_AUXILIARY_SENDS = 2
+  ctx(带属性请求 4 个发送)  → ALC_MAX_AUXILIARY_SENDS = 4
+  ```
+  安全阀：任何异常或返回 0 都立刻退回原样调用，绝不让声音引擎起不来。
+  ⚠ **未在游戏内验证**：Mixin 0.8 支持同一指令上的多个 `@Redirect` 串联，SPR 也在同一句上
+  做同样的事，理论上共存；但"两个 Mod 同时 redirect 同一句"这件事**我没有实测过**。
+  若启动即崩且指向 `SoundEngineMixin`：从 `clouddisc.mixins.json` 的 client 数组里删掉
+  `"SoundEngineMixin"` 即可（其余功能照常，只是混响段数退到 2 段）。
+
+### M3 —— 材质表 + 沿连线逐块累加遮挡（0.12.2）
+
+- **材质表**（`BlockAcoustics`）：自己推导，**没有抄 SPR 的方块配置表**（那是 GPL）。
+  三元组 `(遮挡, 反射率, 吸声)`：
+  1. 基础值按 `BlockState#getSoundGroup()` 的**恒等比较**分类（石/木/羊毛/玻璃/金属/沙/雪/黏液/幽匿/深板岩…，
+     约 20 组）；
+  2. `isOpaqueFullCube` 为假 → 遮挡 ×0.5（楼梯/栅栏/玻璃板…一条缝就该降下来）；
+  3. `getFluidState()` 非空（液体）→ 遮挡 ×0.15、反射率 ≤0.08；
+  4. 硬度 <0（基岩/屏障）→ 遮挡取 1.0；硬度 ==0（火把/作物/花）→ 遮挡 ×0.35；
+  5. 特例：**草方块 / 湿草 / 苔藓块**用的是草木那组声音但**是实心方块**（opaque）→ 按地面算
+     （否则一整块草方块会被当成灌木）。
+  结果用 `IdentityHashMap<BlockState,Params>` 缓存（>8192 清一次防爆）。
+- **沿连线逐块累加**：`cutoff = exp(-遮挡累积 × 3.0)`、`gain = cutoff^0.1`（与 SPR 同形）。
+- **为什么不用 `World#raycast` 反复续射**：命中点正好落在方块表面，续射会把**同一个方块再算一遍**
+  （1 格厚的墙算成 2 格）。改用自己写的 **DDA（Amanatides–Woo）体素遍历** `RayWalk`，
+  一次就把"这条线穿过哪些格子、每个格子的入射面法线"全拿到，且**没有 epsilon 拍脑袋**。
+- **非严格模式**（默认）：主射线被挡时，再把两个端点各偏移 ±1 格的 8 个对角点算一遍**取最小值**
+  —— 门缝/窗缝/拐角能让声音透过来。主射线本来就通透时（最小值必然是 0）直接跳过，不白花钱。
+- **`RayWalk` 已做独立单元验证**（不启动 Minecraft）：仓库里留了
+  [`tools/RayWalkTest.java`](../tools/RayWalkTest.java)，跑法写在文件头。
+  8 组断言全过：轴向 / 负向 / 体对角线 / 边界起点 / maxSteps / 斜射线的格子序列与法线、
+  t 单调性、无重复格。
+- **性能**：`MAX_OCC_STEPS = 96`（注意是**格子数**不是格数 —— 斜射一条 20 格的线最多穿 3×20 个格子，
+  给少了会"远处的墙没算进来"这种静默错误）。命中遮挡累积 ≥3.0 立刻停。
+
+### M4 —— 混响射线 + 1 个 EAXReverb slot（0.12.3）
+
+- 从唱片机发射 `physicsRays`(默认 32) 条射线，方向用**黄金角球面均匀分布**（Fibonacci sphere，
+  不需要随机数），按唱片机坐标旋转一个相位避免所有机器图案一样。
+- 每条最多 **4 次反弹**，镜面反射 `dir - 2(dir·n)n`；命中距离用 DDA 的 t 精确算。
+- `reflectionDelay = 路程 × 0.12 × 反射率`，用三角权重落进 **4 个延迟带**；
+  单次能量 `0.25 × (反射率×0.75 + 0.25)`；带权 `{6.4, 12.8, 12.8, 12.8}`。
+- **共享空气空间**：每个命中点再打一条"到耳朵"的射线，通 → 计入。只在**直通被挡时**才算
+  （通透时开阔度本来就是 1，没必要花这个钱；每次评估最多 48 次）。
+  然后 `directCutoff = max(sqrt(平均共享空气空间)×0.2, cutoff)`（SPR 同形），
+  并给 4 个带各自的 sendCutoff：`exp(-遮挡×3)×(1-w) + w`。
+- EAXReverb 参数由**测到的**平均自由程和平均反射率推：`decayTime ∝ 平均自由程`（大厅尾巴长）、
+  `gainHF ∝ 平均反射率`（吸声房间更暗）。**只在变化超阈值时**才写（避免每 tick 重设造成杂音）。
+
+### M5 —— 4 段发送 + 逐层反射率 + 距离衰减（0.12.4）
+
+- 4 个延迟带各绑一个 aux slot（段号 i ↔ 发送序号 i，固定绑定，不每 tick 改发送拓扑）。
+- **逐层反射率幂次修正**：第 2 层 × 反射率、第 3 层 × 反射率³、第 4 层 × 反射率⁴
+  —— 越晚的带经过的反射越多，对"墙面吸不吸声"越敏感。
+- 晚带加 3% 死区（低于就归零），避免一直挂一层听不清的嘶声。
+- **距离衰减**：`1 - min(距离/48, 1)`（混响在 48 格外消失）。
+- 强度系数 `physicsSoundLevel` 只乘在发送增益上（遮挡是"物理事实"，不受它影响）。
+- EFX 只给了 2 段时，第 3/4 段**折回**前两段，不丢能量。
+
+### M6 —— 方向性 + 水下 + 配置界面（0.12.5）
+
+- **方向性**：把"共享空气空间命中点 → 耳朵"的方向按 `1/距离²` 加权求和，归一化后把声源位置移到
+  `听者 + 方向 × 原距离` —— **到听者的距离不变，所以音量不跳**；只在该方向足够一致
+  （模长 ≥0.5）且直通被挡时才移。位置同样按时间平滑，每刻写 `AL_POSITION`。
+- **水下**：`player.isSubmergedInWater()` → 直通增益 ×0.1、截止 ×0.3、4 段 sendCutoff ×0.4。
+- **配置界面**：新增第 2 节「物理声效」（总开关 / 强度 / 射线数 / 严格遮挡 / 方向性 / 调试日志），
+  并在页面上直接显示 `EfxEngine.status()`（EFX 可不可用、几段）。界面从 4 节变 5 节。
+- 新配置项：`physicsSound`(true) / `physicsSoundLevel`(1.0) / `physicsRays`(32) /
+  `physicsSoundDebug`(false) / `physicsStrictOcclusion`(false) / `physicsSoundDirection`(true)；
+  配置版本 3 → 4（Gson 对缺失字段保留 Java 默认值，无需迁移逻辑，但会重写文件把新键补上）。
+
+### 诊断日志（每 10 秒一行；`physicsSoundDebug=true` 时每 1 秒）
+
+```
+[CloudDisc] 物理声效[M6]: source=3 EFX=可用(4段) 遮挡累积=1.000 直通截止=0.050 直通增益=0.741
+  开阔度=0.00 距离=6.5格 水下=false 位置偏移=0.0格 评估耗时=0.412ms
+  ｜sendGain=[0.31, 0.12, 0.00, 0.00] sendCutoff=[0.05, 0.21, 0.62, 0.62]
+  逐层反射率=[0.52, 0.45, 0.41, 0.38] 平均反射率=0.44 自由程=3.2格
+```
+一眼能看出的东西：`EFX=可用(N段)` / `不可用→DSP`、遮挡累积、直通截止、sendGain、
+`source=` 是不是我们那条、`评估耗时` 是否在预算内。
+
+### 安全 / 性能
+
+- 所有声学代码都包 try/catch：**出错绝不影响播放**；EFX 任何一步失败 → 永久回退 DSP。
+- EFX 生效时 `Acoustics.filterMono` **一个样本都不碰**（避免双重滤波）。
+- 射线采集按 4 刻（5Hz）限频，但**平滑 + 写声源是每刻**都做 → 参数延迟只跟 tick 有关。
+- 平滑系数按时间算：`1 - exp(-Δ秒/0.15)`，不按调用次数。
+- 带时间戳的限频初值一律 `Long.MIN_VALUE / 2`（**踩过两次**：用 `Long.MIN_VALUE` 会和
+  nowTick 相减溢出 → 永远 return）。
+- 预算估算：遮挡 ≤ 9 条 × 96 格、混响 32 条 × ≤4 次 × ≤96 格 ≈ 3000~10000 次格查询/次评估，
+  实测耗时见日志（预期 0.3~1.5ms，每 4 刻一次）。
+
+### 未验证 / 已知限制（诚实清单）
+
+- **听感只能由人测**：我这边能验证的是"构建通过 / refmap 解析 / 单元测试 / 代码审查"。
+- **`SoundEngineMixin` 的 `@Redirect` 与 SPR 同时生效**这件事没有被实测（见上）。
+- **方块声音组 → 具体方块**的对应关系没有运行时验证（想 bootstrap 方块注册表跑探针，
+  但重映射后的 jar 在 Fabric Loader 之外会因包私有成员不可访问而抛 `IllegalAccessError`）。
+  失败模式是**退到默认值（近石质）**，不会崩溃、不会静音。
+- **多台唱片机同时播放**：混响的 aux slot 是全局共享的，两台机器的混响参数会互相覆盖
+  （直通遮挡/位置是按声源分开的，不受影响）。
+- **DSP 兜底路径**是单一链路的（同一时刻只有一个会话的滤波状态生效），
+  这与旧版行为一致。
+- 混响段数取决于 `ALC_MAX_AUXILIARY_SENDS`：本机默认 2，请求后 4。
+
 ## 0.9.9 / 0.9.8
 
 **修复中继通道周期性静默失效（跟随方回落原版的真根因）**
