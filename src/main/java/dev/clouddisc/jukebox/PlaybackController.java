@@ -80,9 +80,9 @@ public final class PlaybackController {
 	}
 
 	/** 右键后等世界事件的窗口（tick）。 */
-	private static final int PENDING_TICKS = 60;
+	private static final int PENDING_TICKS = 200;
 	/** 没收到 CLAIM 时静音等待的窗口：很短，避免误伤普通唱片。 */
-	private static final int HOLD_TICKS_UNCLAIMED = 40;
+	private static final int HOLD_TICKS_UNCLAIMED = 120;
 	/** 收到 CLAIM 后愿意等 PLAY 的窗口。 */
 	private static final int HOLD_TICKS_CLAIMED = 140;
 
