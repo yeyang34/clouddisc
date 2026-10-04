@@ -5,6 +5,10 @@ out/
 run/
 # 离线自检（tools/*.java）编译出来的 class，不进仓库
 tools/out/
+# 离线自检工具的临时产物：classpath 快照与原始输出（每次重跑都会变）
+tools/cp.txt
+tools/cp_raw.txt
+tools/*_out.txt
 
 # IDE
 .idea/

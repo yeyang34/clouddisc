@@ -85,6 +85,29 @@ public final class EfxEngine {
 	/** 能量预算用的暂存（只在主线程用，避免每 tick 分配）。 */
 	private static final float[] SEND_GAIN_SCRATCH = new float[MAX_BANDS];
 	private static final float[] SEND_CUTOFF_SCRATCH = new float[MAX_BANDS];
+	/** 0.12.9：预算计算结果的暂存（{@link #energyBudget} 写进这里）。 */
+	private static final float[] BUDGET_SCRATCH = new float[4];
+	/**
+	 * 0.12.9 <b>Bug B</b>：能量预算对<b>直通</b>的最大压降（0.5 = 直通最多被压到一半）。
+	 * <p>见 {@link #energyBudget}：发送过量时优先削发送（它才是超量的原因），
+	 * 直通最多降到一半 —— 用户 0.12.9 的验收要求是"预算不把直通压到 0.5 倍以下"。
+	 */
+	private static final float BUDGET_MIN_DIRECT = 0.5f;
+	/** 0.12.9 诊断：最近一次写入时的直通倍率（1.0 = 没削）与"有效发送能量" Σ(gain×cutoff)。 */
+	private static volatile float lastBudget = 1.0f;
+	private static volatile float lastSendEnergy = 0.0f;
+	/** 0.12.9：「能量预算」诊断日志的限频时间戳（刻）。 */
+	private static long lastBudgetLogTick = Long.MIN_VALUE / 2;
+	/**
+	 * 0.12.9：湿声（混响）的默认输出增益 —— 与 {@link Reverb#gain} 的初值一致
+	 * （{@code Acoustics.traceReverb} 每段也把它写成 0.32）。
+	 * <p>预算为什么还要乘它：发进 aux slot 的信号<b>还要经过 EAXReverb 自己的 gain</b> 才与直通相加，
+	 * 所以"这一路发送真正贡献了多少能量"是
+	 * {@code sendGain × sendCutoff × 混响输出增益}。
+	 * 不乘它就会高估混响、把直通压得过多 —— 现场日志第 3 行（通畅、开阔地）里
+	 * 直通增益被压到 0.428 倍，听感就是"整体小声"。
+	 */
+	private static final float DEFAULT_WET_GAIN = 0.32f;
 
 	/** 每个混响段的 EAXReverb 参数。数值自己推，不抄 SPR 的配置表。
 	 * <p>0.12.6：默认值整体上调（gain 0.28→0.32、decayTime 1.2→1.6、
@@ -240,6 +263,77 @@ public final class EfxEngine {
 	}
 
 	/**
+	 * <b>0.12.9 修 Bug B：能量预算（纯函数；生产路径 {@link #applyToSource} 与
+	 * {@code tools/PhysicsParamsTest.java} 共用同一个实现）。</b>
+	 *
+	 * <h2>旧公式（0.12.7~0.12.8）错在哪</h2>
+	 * <pre>
+	 *   total  = 直通增益 + Σ sendGain[i]                 // ← 把"被发送滤波器掐死的发送"当成满能量
+	 *   budget = min(1, 1/total)
+	 *   直通增益 ×= budget；sendGain[i] ×= budget
+	 * </pre>
+	 * 现场日志：{@code 直通增益=0.153、sendGain=[1.000, 0.313, 0, 0]} ⇒ total = 1.466 ⇒ budget = 0.682。
+	 * 可那时 4 路发送的 {@code sendCutoff = 0.001}（= 一点声音都没送出去），却照样把直通增益
+	 * 从 0.153 压到 0.104（-3.3 dB）—— 用户听成"又闷又小声 / 整体全部效果都没了"。
+	 *
+	 * <h2>新公式（0.12.9）</h2>
+	 * <pre>
+	 *   E      = Σ (sendGain[i] × sendCutoff[i] × wetGain)   // 有效湿声能量：被低通/混响增益缩掉的都不占预算
+	 *   total  = 直通增益 + E
+	 *   sendBudget   = total &gt; 1 ? 1/total : 1               // 发送按真实预算缩（超量的是它）
+	 *   directBudget = max(sendBudget, BUDGET_MIN_DIRECT)     // 直通最多降到一半
+	 * </pre>
+	 *
+	 * @param wetGain    混响自身的输出增益（生产路径传当前段上写着的 {@code AL_EAXREVERB_GAIN}，
+	 *                   默认 {@link #DEFAULT_WET_GAIN}）
+	 * @param out 由调用方提供的输出数组（长度 ≥ 4），避免每 tick 分配：
+	 *            {@code [0]=直通倍率}、{@code [1]=发送倍率}、{@code [2]=有效发送能量}、
+	 *            {@code [3]=直通+有效发送（缩放前）}
+	 */
+	public static void energyBudget(float directGain, float[] sendGain, float[] sendCutoff, int sendBands, float wetGain,
+			float[] out) {
+		float wet = clamp01(wetGain);
+		float sumSend = 0.0f;
+		for (int i = 0; i < MAX_BANDS; i++) {
+			if (i >= sendBands) {
+				continue; // 只有真的接上的段才占预算（可用段数可能只有 1~2）
+			}
+			float g = clamp01(at(sendGain, i, 0.0f));
+			float c = clamp01(at(sendCutoff, i, 1.0f));
+			sumSend += g * c * wet; // ← 0.12.9 的关键：乘上滤波器高频增益与混响自身增益
+		}
+		float dg = clamp01(directGain);
+		float total = dg + sumSend;
+		float sendBudget = total > 1.0f ? 1.0f / total : 1.0f;
+		out[0] = Math.max(sendBudget, BUDGET_MIN_DIRECT);
+		out[1] = sendBudget;
+		out[2] = sumSend;
+		out[3] = total;
+	}
+
+	/** 第 0 段混响当前写着的输出增益（还没写过参数时用 {@link #DEFAULT_WET_GAIN}）。 */
+	private static float currentWetGain() {
+		if (slotBoundValid[0]) {
+			return clamp01(slotBound[0].gain);
+		}
+		return DEFAULT_WET_GAIN;
+	}
+
+	private static float at(float[] a, int i, float fallback) {
+		return a != null && i < a.length ? a[i] : fallback;
+	}
+
+	/** 0.12.9 诊断：最近一次写入用的直通倍率（1.0 = 没削）。日志字段 `能量预算(直通倍率)`。 */
+	public static float lastBudget() {
+		return lastBudget;
+	}
+
+	/** 0.12.9 诊断：最近一次写入时的"有效发送能量" Σ(sendGain×sendCutoff)。 */
+	public static float lastSendEnergy() {
+		return lastSendEnergy;
+	}
+
+	/**
 	 * 把某个混响段的 EAXReverb 参数灌进效果器（只在调用方判定"变化够大"时才会调）。
 	 *
 	 * <p><b>0.12.7</b>：正常路径<b>只改参数</b>（{@code alEffectf}），不再每次都把 effect 重设到 slot
@@ -309,7 +403,11 @@ public final class EfxEngine {
 	 *       {@code budget = min(1, 1/(直通+Σ发送))} 缩放，保证
 	 *       {@code 直通 + Σ发送 ≤ 1.0}。EFX 的混响是在 OpenAL 混音器里与直通<b>相加</b>的，
 	 *       0.12.6 又把发送基准提到 1.6、EAXReverb gain 提到 0.32 —— 合计很容易越过 0 dBFS
-	 *       而被输出端削顶（听感就是"接触不良"的刺声）。有余量时不做任何衰减。</li>
+	 *       而被输出端削顶（听感就是"接触不良"的刺声）。有余量时不做任何衰减。
+	 *       <p><b>0.12.9 修 Bug B</b>：上式用的是<b>没滤波的</b>发送增益，于是"被发送低通掐死、
+	 *       一点声音都没送出去"的段照样占满预算，把直通增益压到 0.68 倍。现在改成
+	 *       {@code E = Σ(sendGain×sendCutoff)}（有效发送能量），直通最多降到一半 —— 见
+	 *       {@link #energyBudget}。</li>
 	 *   <li><b>写入限频 + 更大阈值</b>：每 {@value #WRITE_INTERVAL_TICKS} 刻才写一次，
 	 *       且单个参数变化 &lt; {@value #EPS} 就不写（旧值 0.008 太小，近似每 tick 都在写）。</li>
 	 * </ol>
@@ -346,27 +444,30 @@ public final class EfxEngine {
 			}
 			lastWriteTick = nowTick;
 
-			// ---- 能量预算（见方法注释 ②）----
+			// ---- 能量预算（见 {@link #energyBudget} 与类注释 ②）----
 			// 用预分配的暂存数组：applyToSource 只在客户端主线程调用（Acoustics.tick），
 			// 不做每 tick 的堆分配。
 			float[] sg = SEND_GAIN_SCRATCH;
 			float[] sc = SEND_CUTOFF_SCRATCH;
-			float sumSend = 0.0f;
 			for (int i = 0; i < MAX_BANDS; i++) {
-				sg[i] = clamp01(sendGain != null && i < sendGain.length ? sendGain[i] : 0.0f);
-				sc[i] = clamp01(sendCutoff != null && i < sendCutoff.length ? sendCutoff[i] : 1.0f);
-				if (i < bands) {
-					sumSend += sg[i];
-				}
+				sg[i] = clamp01(at(sendGain, i, 0.0f));
+				sc[i] = clamp01(at(sendCutoff, i, 1.0f));
 			}
 			float dc = clamp01(directCutoff);
 			float dg = clamp01(directGain);
-			float total = dg + sumSend;
-			float budget = total > 1.0f ? 1.0f / total : 1.0f;
-			dg *= budget;
+			// 0.12.9 修 Bug B：预算按"有效湿声能量"Σ(gain×cutoff×混响增益) 算；
+			// 发送按真实预算缩，直通最多降到一半（0.12.8 是"和无滤波的发送一起算总量"，
+			// 于是 sendCutoff=0.001 的 4 路空发送照样把直通从 0.153 压到 0.104）。
+			energyBudget(dg, sg, sc, bands, currentWetGain(), BUDGET_SCRATCH);
+			float directBudget = BUDGET_SCRATCH[0];
+			float sendBudget = BUDGET_SCRATCH[1];
+			dg *= directBudget;
 			for (int i = 0; i < MAX_BANDS; i++) {
-				sg[i] *= budget;
+				sg[i] *= sendBudget;
 			}
+			lastBudget = directBudget;
+			lastSendEnergy = BUDGET_SCRATCH[2];
+			logBudget(dg, lastSendEnergy, directBudget, sendBudget, nowTick);
 
 			// ---- 直通滤波器：接线只在换声源时做一次，之后只改数值 ----
 			if (force || Math.abs(dc - lastDirectCutoff) > EPS || Math.abs(dg - lastDirectGain) > EPS) {
@@ -434,6 +535,27 @@ public final class EfxEngine {
 		} catch (Throwable t) {
 			return false;
 		}
+	}
+
+	/**
+	 * <b>0.12.9 新增：能量预算诊断</b>（{@code physicsSoundDebug=true} 时）。
+	 * <p>只在"真的削了东西"时打，且 1 秒最多一条。现场核对方法：
+	 * 日志里 {@code 直通增益} 是<b>预算之前</b>的值，乘上这一行的"直通倍率"才是真正写进声源的值。
+	 */
+	private static void logBudget(float directGainAfter, float sendEnergy, float directBudget, float sendBudget,
+			long nowTick) {
+		if (directBudget >= 1.0f - 1.0e-4f && sendBudget >= 1.0f - 1.0e-4f) {
+			return; // 没削：不打（绝大多数情况）
+		}
+		if (!debugOn()) {
+			return;
+		}
+		if (nowTick != 0L && nowTick - lastBudgetLogTick < 20L) {
+			return;
+		}
+		lastBudgetLogTick = nowTick;
+		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效·能量预算: 有效发送能量={} 直通(削后)={} → 直通倍率={} 发送倍率={}",
+				fmt(sendEnergy), fmt(directGainAfter), fmt(directBudget), fmt(sendBudget));
 	}
 
 	private static String fmt(float v) {

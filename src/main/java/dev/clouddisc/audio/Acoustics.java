@@ -108,6 +108,47 @@ public final class Acoustics {
 	private static final double RELAX_MAX_MIN = 0.0;
 	private static final double RELAX_MAX_MAX = 0.60;
 
+	// ---------------------------------------------------------------- 0.12.9：修 Bug A（混响发送高频）+ 可听下限
+	/**
+	 * 0.12.9 <b>Bug A</b>：混响发送高频的<b>硬下限</b>。
+	 * <p>0.12.8 现场日志 {@code sendCutoff=[0.001, 0.001, 0.001, 0.001]}：4 路混响发送自己的低通
+	 * 被压到 0.001（约 -60 dB）⇒ <b>混响完全听不见</b>（用户："直接整体全部效果都没了"）。
+	 * <p>{@value}（-14 dB 高频）的意思是"混响可以变暗，但绝不允许被掐死"。
+	 * 只有"强度=0"让发送增益归零、以及水下的第二道下限（{@link #SEND_CUTOFF_MIN_UNDERWATER}）会低于它。
+	 */
+	private static final float SEND_CUTOFF_MIN = 0.20f;
+	/** 0.12.9：水下再压一档的<b>第二道</b>下限（水下是有意的极端档，但仍不许掐成静音）。 */
+	private static final float SEND_CUTOFF_MIN_UNDERWATER = 0.10f;
+	/**
+	 * 0.12.9 <b>Bug A</b>：混响高频受"直通遮挡"影响的系数。
+	 * <p>为什么不能沿用直通那条链路的 {@link #ABSORPTION_DEFAULT}(=4.5)：
+	 * {@code exp(-occ*k)} 是给<b>直通穿墙</b>调的（0.12.6 为了"隔墙一耳就闷"），occ=2.1 时它是
+	 * {@code exp(-9.45) = 7.9e-5}。混响发送走的是 aux send，<b>不穿那堵墙</b>，
+	 * 拿它当低通就是把整条发送掐死。
+	 * <p>现在 0.5：occ=2.1 → 0.35（混响跟着闷一点），occ=0 → 1.0（通畅时一点也不压）。
+	 */
+	private static final float SEND_OCC_K = 0.5f;
+	/**
+	 * 0.12.9 <b>Bug A</b>：每层反射面的"高频反射增益" = {@code HF_REFL_BASE + (1-HF_REFL_BASE) × 反射率}。
+	 * <p>这才是"混响的高频被吸掉多少"的物理量（原来用的是直通遮挡，是两回事）：
+	 * 石头(0.60)→0.84、玻璃(0.90)→0.96、羊毛(0.12)→0.65、完全吸声(0)→0.60。
+	 * 也就是"吸声的房间余响更暗，但一定还在"。
+	 */
+	private static final float HF_REFL_BASE = 0.60f;
+	/**
+	 * 0.12.9：直通的<b>可听下限</b>（用户要求"明显，不是消失"）。
+	 * <p>0.12.8 现场：两层石头墙 → 直通增益 0.153（-16.3 dB）、GAINHF 0.006（-44 dB），
+	 * 用户原话"已经几乎听不见"。
+	 * <ul>
+	 *   <li>增益 {@code ≥ 0.25}（-12.0 dB）：明显变小，但内容还听得见；<b>仍低于一层玻璃的 0.41</b>，
+	 *       所以"玻璃 / 木板 / 石头 / 两层石头"的材质与厚度对比不会被抹平。</li>
+	 *   <li>高频 {@code ≥ 0.02}（-34.0 dB）：仍然是"隔着厚墙"的闷，只是不再闷到像被静音。</li>
+	 * </ul>
+	 * <p>水下（×0.1 / ×0.3）<b>故意</b>会低于这两个下限 —— 那是另一个开关，语义不同。
+	 */
+	private static final float MIN_AUDIBLE_DIRECT_GAIN = 0.25f;
+	private static final float MIN_AUDIBLE_DIRECT_CUTOFF = 0.02f;
+
 	private static final double AIR_START = 12.0;
 	/** 沿连线最多穿过多少格（性能上限）。
 	 * <p>注意这是"<b>格子数</b>"不是"格数"：斜射一条 20 格的线最多会穿过 3x20 个格子，
@@ -440,6 +481,77 @@ public final class Acoustics {
 		}
 	}
 
+	// ---------------------------------------------------------------- 0.12.9：可离线复算的纯函数（生产与自检共用）
+	/**
+	 * 直通链路的输出（{@code AL_LOWPASS_GAINHF} = {@code cutoff}、{@code AL_LOWPASS_GAIN} = {@code gain}）。
+	 * <p><b>0.12.9 为什么抽成记录类型</b>：让 {@code tools/PhysicsParamsTest.java} 能<b>直接调用生产代码</b>，
+	 * 而不是"把公式照抄一遍"—— 0.12.7 的教训正是"自检抄公式，抄错了也看不出来"。
+	 */
+	public record DirectParams(float cutoff, float gain) {
+	}
+
+	/**
+	 * <b>0.12.9：直通参数（纯函数；生产路径 {@link #evaluate} 与离线自检共用同一个实现）。</b>
+	 *
+	 * @param occ       沿连线累加（含放宽）后的遮挡值
+	 * @param k         遮挡陡度 = {@code physicsAbsorption × physicsSoundLevel}（默认 4.5）
+	 * @param avgShared 共享空气空间（开阔度）0..1
+	 * @param dist      唱片机到耳朵的距离（格）
+	 */
+	public static DirectParams directParams(double occ, float k, float avgShared, double dist) {
+		float cutoffNoAir = (float) Math.exp(-occ * k);
+		// 开阔度修正：同一片开阔空间里，声音能从别处绕过来 → 直通不该被压得太死
+		// （对应 SPR 的 directCutoff = max(sqrt(averageSharedAirspace)*0.2, directCutoff)，
+		//  但加了门槛：遮挡达到 OPENNESS_GATE_OCC 之后，开阔度一律不许抬截止。）
+		float gate = (float) clampD(occ / OPENNESS_GATE_OCC, 0.0, 1.0);
+		float opennessFloor = (float) (OPENNESS_FLOOR_COEF * Math.sqrt(Math.max(0.0f, avgShared)))
+				* (1.0f - gate);
+		float cutoffWithShared = Math.max(opennessFloor, cutoffNoAir);
+		float gain = (float) Math.pow(cutoffWithShared, DIRECT_GAIN_EXP);
+		// 空气吸收：按距离衰减高频（"远处高频先没"）。只压高频，不压总增益
+		// —— 总增益本来就有 OpenAL 的距离衰减在管。
+		float air = (float) Math.pow(0.9, Math.max(0.0, (dist - AIR_START) / 3.0));
+		float cutoff = Math.max(MIN_DIRECT_CUTOFF, cutoffWithShared * air);
+		// ---- 0.12.9 可听下限：隔墙再厚，也留一条"听得见但很闷"的路 ----
+		// 0.12.8 现场：两层石头墙 → 直通增益 0.153、GAINHF 0.006，用户听成"几乎听不见"。
+		// 这里只给"遮挡算出来的值"设下限；水下（调用方再乘 0.1 / 0.3）故意允许更低。
+		gain = Math.max(gain, MIN_AUDIBLE_DIRECT_GAIN);
+		cutoff = Math.max(cutoff, MIN_AUDIBLE_DIRECT_CUTOFF);
+		return new DirectParams(clamp01(cutoff), clamp01(gain));
+	}
+
+	/**
+	 * <b>0.12.9 Bug A 的修复：混响发送的高频增益（纯函数；生产与离线自检共用同一个实现）。</b>
+	 *
+	 * <h2>旧公式（0.12.6~0.12.8，写在 {@code traceReverb} 里）错在哪</h2>
+	 * <pre>
+	 *   occCut = exp(-occ × k)                 // k = physicsAbsorption = 4.5，本来是给"直通穿墙"调的
+	 *   sendCutoff[i] = occCut × (1 - w_i) + w_i
+	 * </pre>
+	 * occ=2.1（两层石头墙）时 {@code occCut = exp(-9.45) = 7.9e-5}；只要"绕过来的声音"权重
+	 * {@code w_i = 0}（现场日志 {@code 开阔度=0.000}），4 路发送的低通就全塌到 7.9e-5
+	 * —— 现场下发值 {@code 0.001}，混响等于被自己掐掉。
+	 *
+	 * <h2>新公式（0.12.9）</h2>
+	 * <pre>
+	 *   occSend = SEND_CUTOFF_MIN + (1 - SEND_CUTOFF_MIN) × exp(-occ × SEND_OCC_K)   // 比直通温和得多
+	 *   base    = occSend × (1 - w) + w                                             // 绕过来的声音不受遮挡
+	 *   mat     = HF_REFL_BASE + (1 - HF_REFL_BASE) × 反射率                         // 混响路径自己吸掉的高频
+	 *   sendCutoff = clamp(base × mat, SEND_CUTOFF_MIN, 1)                           // 硬下限 0.20
+	 * </pre>
+	 *
+	 * @param occ          遮挡值（含放宽）
+	 * @param wantWeight   该延迟带"从别处绕过来"的权重 {@code w_i}（0..1）
+	 * @param reflectivity 该延迟带那一层的平均反射率（≤0 时调用方传平均反射率做兜底）
+	 */
+	public static float sendCutoffFor(double occ, float wantWeight, float reflectivity) {
+		float occSend = SEND_CUTOFF_MIN + (1.0f - SEND_CUTOFF_MIN) * (float) Math.exp(-occ * SEND_OCC_K);
+		float w = clamp01(wantWeight);
+		float base = occSend * (1.0f - w) + w;
+		float mat = HF_REFL_BASE + (1.0f - HF_REFL_BASE) * clamp01(reflectivity);
+		return Math.max(SEND_CUTOFF_MIN, Math.min(1.0f, base * mat));
+	}
+
 	// ---------------------------------------------------------------- 采集层（射线）
 
 	/**
@@ -526,29 +638,21 @@ public final class Acoustics {
 		// 0 = 关闭（上面已提前返回）、1.0 = 默认、2.0 = 非常激进
 		float k = absorption() * level;
 		st.lastK = k;
-		float cutoffNoAir = (float) Math.exp(-occ * k);
 		st.occlusionAcc = (float) occ;
 
 		// ---- 混响射线（M4/M5）：从唱片机按黄金角球面均匀发射，每条最多 4 次反弹 ----
-		ReverbResult rr = traceReverb(world, center, ear, jukebox, occ, k);
+		ReverbResult rr = traceReverb(world, center, ear, jukebox, occ);
 		float avgShared = rr.sharedAirspaceWeight;
 		st.openness = occ <= 0.0 ? 1.0f : avgShared;
 
-		// 开阔度修正：同一片开阔空间里，声音能从别处绕过来 → 直通不该被压得太死
-		// （对应 SPR 的 directCutoff = max(sqrt(averageSharedAirspace)*0.2, directCutoff)，
-		//  但加了门槛：遮挡达到 OPENNESS_GATE_OCC 之后，开阔度一律不许抬截止 ——
-		//  否则"隔一层石头墙"会被开阔度顶回 0.19 左右，听感只剩"稍微暗一点"。）
-		float gate = (float) clampD(occ / OPENNESS_GATE_OCC, 0.0, 1.0);
-		float opennessFloor = (float) (OPENNESS_FLOOR_COEF * Math.sqrt(Math.max(0.0f, avgShared)))
-				* (1.0f - gate);
-		float cutoffWithShared = Math.max(opennessFloor, cutoffNoAir);
-		float gain = (float) Math.pow(cutoffWithShared, DIRECT_GAIN_EXP);
-		// 空气吸收：按距离衰减高频（"远处高频先没"）。只压高频，不压总增益
-		// —— 总增益本来就有 OpenAL 的距离衰减在管。
-		float air = (float) Math.pow(0.9, Math.max(0.0, (dist - AIR_START) / 3.0));
-		float cutoff = Math.max(MIN_DIRECT_CUTOFF, cutoffWithShared * air);
+		// ---- 直通：截止/增益/开阔度修正/空气吸收/0.12.9 可听下限，全部在 directParams 里 ----
+		// （0.12.9 把这一段抽成纯函数，让 offline 自检能跑生产同一条实现）
+		DirectParams dp = directParams(occ, k, avgShared, dist);
+		float cutoff = dp.cutoff();
+		float gain = dp.gain();
 
 		// ---- M6 水下：直通再乘 0.1，混响发送也一起变闷 ----
+		// 注意：水下**故意**低于上面那两个可听下限 —— 它是另一个开关，语义是"闷到几乎听不清"。
 		boolean underwater = false;
 		try {
 			underwater = self.isSubmergedInWater();
@@ -585,7 +689,8 @@ public final class Acoustics {
 		fillSends(st, rr, soundLevel());
 		if (underwater) {
 			for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
-				st.tSendCutoff[i] = clamp01(st.tSendCutoff[i] * 0.4f);
+				// 0.12.9：水下是"更闷"的有意档位，但也**不许掐成静音** —— 有第二道下限。
+				st.tSendCutoff[i] = Math.max(SEND_CUTOFF_MIN_UNDERWATER, clamp01(st.tSendCutoff[i] * 0.4f));
 			}
 		}
 		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
@@ -733,8 +838,13 @@ public final class Acoustics {
 				new EfxEngine.Reverb(), new EfxEngine.Reverb()};
 	}
 
-	private static ReverbResult traceReverb(World world, Vec3d center, Vec3d ear, BlockPos jukebox, double occ,
-			float k) {
+	/**
+	 * 混响射线：从唱片机按黄金角球面均匀发射 {@code physicsRays} 条，每条最多 {@link #REVERB_BOUNCES} 次反弹。
+	 *
+	 * <p><b>0.12.9</b>：不再需要 {@code k}（旧代码用它算 {@code exp(-occ*k)} 当发送低通，
+	 * 就是 Bug A 的来源 —— 见 {@link #sendCutoffFor}）。
+	 */
+	private static ReverbResult traceReverb(World world, Vec3d center, Vec3d ear, BlockPos jukebox, double occ) {
 		ReverbResult out = new ReverbResult();
 		int numRays = rays();
 		float rcpTotalRays = 1.0f / (numRays * (float) REVERB_BOUNCES);
@@ -827,11 +937,19 @@ public final class Acoustics {
 		float w3 = clamp(sharedAirspace / 10.0f, 0.0f, 1.0f);
 		out.sharedAirspaceWeight = (w0 + w1 + w2 + w3) * 0.25f;
 
-		float occCut = (float) Math.exp(-occ * k);
-		out.sendCutoff[0] = occCut * (1.0f - w0) + w0;
-		out.sendCutoff[1] = occCut * (1.0f - w1) + w1;
-		out.sendCutoff[2] = occCut * (1.0f - w2) + w2;
-		out.sendCutoff[3] = occCut * (1.0f - w3) + w3;
+		// ---- 0.12.9 Bug A：混响发送的高频 ----
+		// 旧公式（0.12.6~0.12.8）：occCut = exp(-occ*k)、sendCutoff[i] = occCut*(1-w_i)+w_i。
+		// k=4.5、occ=2.1 时 occCut = exp(-9.45) = 7.9e-5，w=0 时 4 路发送的低通全是 7.9e-5
+		// —— 现场下发值 0.001，混响被自己掐掉（"没有音效，整体全部效果都没了"）。
+		// 现在：只按"混响路径自己吸掉多少高频"（逐层反射率）+ 温和的遮挡项 + 硬下限 0.20。
+		// 纯函数实现见 Acoustics#sendCutoffFor（离线自检跑同一条）。
+		float[] bandWeights = {w0, w1, w2, w3};
+		for (int i = 0; i < bandWeights.length; i++) {
+			// 这一层一条射线都没命中（例如全跑进了开阔天空）时，bandRefl[i] 是 0：
+			// 那是"没测到"，不是"全吸声"，用平均反射率兜底，避免凭空多压一次高频。
+			float refl = out.bandRefl[i] > 0.0f ? out.bandRefl[i] : (float) out.avgReflectivity;
+			out.sendCutoff[i] = sendCutoffFor(occ, bandWeights[i], refl);
+		}
 
 		// 距离衰减：离得越远，混响越少（否则整个地图都在响同一份余响）
 		double dist = ear.distanceTo(center);
@@ -1175,7 +1293,7 @@ public final class Acoustics {
 		Vec3d ear = earOf(self);
 		double dist = ear.distanceTo(centerOf(jukebox));
 		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: ver={} source={} EFX={} 遮挡累积={} 主射线遮挡={} 主射线走格={} 实心格={} 判定挡={} 通透通路={}/{} 放宽={} 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
-						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格",
+						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格 能量预算(直通倍率)={} 有效发送能量={}",
 				version(),
 				sourceId,
 				EfxEngine.isAvailable() ? "可用(" + EfxEngine.bands() + "段)" : "不可用→DSP",
@@ -1184,7 +1302,10 @@ public final class Acoustics {
 				fmt(st.lastK),
 				fmt(st.directCutoff), fmt(st.directGain), fmt(st.openness),
 				fmt1(dist), st.underwater, fmt1(offsetOf(st, jukebox)), fmt3(st.evalNanos / 1.0e6),
-				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath));
+				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath),
+				// 0.12.9：这两个数来自 EfxEngine.applyToSource ——
+				// 直通增益 × 能量预算(直通倍率) 才是真正写进 OpenAL 的值。
+				fmt(EfxEngine.lastBudget()), fmt(EfxEngine.lastSendEnergy()));
 	}
 
 	/** Mod 版本号（日志里带上：排障时一眼看出用户到底跑的哪一版）。 */

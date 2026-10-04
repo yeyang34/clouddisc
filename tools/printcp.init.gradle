@@ -1,9 +1,13 @@
-﻿// 临时 init 脚本（不修改仓库里的 build.gradle）：把 Minecraft 完整运行期 classpath 打出来。
-// 离线自检（tools\OcclusionWalkTest.java）要用它拿到 classpath —— 那条路径需要真实的
-// VoxelShape/Box，但**不需要启动游戏**。
+// Temporary Gradle init script (does NOT modify the repo's build.gradle):
+// it prints the full Minecraft runtime classpath, which the offline self-checks in
+// tools/ need (they use the real VoxelShape/Box classes but must NOT start the game).
 //
-// 用法： gradlew -I tools\printcp.init.gradle :printRuntimeCp -q
-//       输出里 CPSTART / CPEND 之间的那一行就是完整 classpath（含 Minecraft 与全部依赖库）。
+// NOTE (0.12.9): this file must stay ASCII-only and WITHOUT a UTF-8 BOM.
+// Gradle reads init scripts with the platform default encoding on this machine (GBK),
+// and a BOM there is a hard syntax error ("Unexpected character: '?' @ line 1, column 1").
+//
+// Usage:  gradlew -I tools\printcp.init.gradle :printRuntimeCp -q
+//         the single line between CPSTART / CPEND is the full classpath.
 allprojects { p ->
     p.afterEvaluate {
         if (p.plugins.hasPlugin('java')) {

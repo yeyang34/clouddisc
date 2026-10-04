@@ -33,6 +33,13 @@ public final class AcousticsMath {
 	static final int PATHS_NEED_NEW = 6;          // DEFAULT_OPEN_PATHS（0.12.7）
 	static final double RELAX_CAP_NEW = 0.40;     // DEFAULT_RELAX_MAX（0.12.7）
 
+	// ---- 0.12.9（当前）的常数 ----
+	static final double MIN_AUDIBLE_GAIN = 0.25;   // Acoustics.MIN_AUDIBLE_DIRECT_GAIN（可听下限）
+	static final double MIN_AUDIBLE_CUTOFF = 0.02; // Acoustics.MIN_AUDIBLE_DIRECT_CUTOFF
+	static final double SEND_CUTOFF_MIN = 0.20;    // Acoustics.SEND_CUTOFF_MIN（混响发送高频的下限）
+	static final double SEND_OCC_K = 0.5;          // Acoustics.SEND_OCC_K（比直通的 k 温和得多）
+	static final double HF_REFL_BASE = 0.60;       // Acoustics.HF_REFL_BASE（每层反射面的高频增益基线）
+
 	// ---- 0.12.6（旧）的常数 ----
 	static final int PATHS_NEED_OLD = 3;          // 0.12.6 的 physicsOcclusionPaths 默认值
 	static final double RELAX_CAP_OLD = 0.85;     // 0.12.6 写死的 MAX_RELAX
@@ -92,6 +99,41 @@ public final class AcousticsMath {
 		double gain = Math.pow(cutoffWithShared, GAIN_EXP_OLD);
 		double cutoff = Math.max(MIN_CUTOFF_OLD, cutoffWithShared);
 		return new double[] {cutoff, gain};
+	}
+
+	/**
+	 * 0.12.9（当前）：在 0.12.7 的基础上加"可听下限"。
+	 * <p>生产实现是 {@code Acoustics.directParams(...)}（0.12.9 抽成了纯函数，
+	 * {@code tools/PhysicsParamsTest.java} 直接调它；这里是为对照再写一遍）。
+	 */
+	static double[] new129Pipeline(double occ, double k) {
+		double[] r = newPipeline(occ, k);
+		return new double[] {Math.max(MIN_AUDIBLE_CUTOFF, r[0]), Math.max(MIN_AUDIBLE_GAIN, r[1])};
+	}
+
+	/**
+	 * 0.12.8（已删除）的混响发送高频 —— Bug A 的旧公式：
+	 * {@code occCut = exp(-occ*k)}、{@code sendCutoff = occCut*(1-w)+w}。
+	 */
+	static double sendCutoff128(double occ, double k, double w) {
+		double occCut = Math.exp(-occ * k);
+		return occCut * (1.0 - w) + w;
+	}
+
+	/**
+	 * 0.12.9（当前）的混响发送高频 —— 生产实现是 {@code Acoustics.sendCutoffFor(occ, w, 反射率)}。
+	 * <pre>
+	 *   occSend = 0.20 + 0.80*exp(-occ*0.5)
+	 *   base    = occSend*(1-w) + w
+	 *   mat     = 0.60 + 0.40*反射率
+	 *   return  clamp(base*mat, 0.20, 1)
+	 * </pre>
+	 */
+	static double sendCutoff129(double occ, double w, double refl) {
+		double occSend = SEND_CUTOFF_MIN + (1.0 - SEND_CUTOFF_MIN) * Math.exp(-occ * SEND_OCC_K);
+		double base = occSend * (1.0 - w) + w;
+		double mat = HF_REFL_BASE + (1.0 - HF_REFL_BASE) * clamp(refl, 0.0, 1.0);
+		return Math.max(SEND_CUTOFF_MIN, Math.min(1.0, base * mat));
 	}
 
 	static double db(double v) {
@@ -208,6 +250,54 @@ public final class AcousticsMath {
 		System.out.printf("  0.12.7 sends                 = %.4f  (%.1f dB)%n", newPipeline(1.00, K_NEW)[0],
 				db(newPipeline(1.00, K_NEW)[0]));
 		System.out.println();
+		// ---------------------------------------------------------------- 0.12.9：可听下限 + 混响发送高频（Bug A）
+		System.out.println("== 0.12.9 direct audibility floor: \"obvious, not gone\" ==");
+		System.out.println("   (floor policy: GAIN >= 0.25, GAINHF >= 0.02 -- applied to the occlusion result,");
+		System.out.println("    BEFORE the underwater x0.1/x0.3 which is a different switch)");
+		System.out.printf("%-26s %13s %13s %12s %12s%n",
+				"scene", "GAINHF(0.12.8)", "GAINHF(0.12.9)", "GAIN(0.12.8)", "GAIN(0.12.9)");
+		String[] floorNames = {"door CLOSED", "1x glass", "1x planks", "1x stone", "2x stone",
+				"2.1 (real log)", "3.0 (max occ)"};
+		double[] floorOcc = {0.44, 0.20, 0.55, 1.00, 2.00, 2.10, 3.00};
+		for (int i = 0; i < floorNames.length; i++) {
+			double[] a = newPipeline(floorOcc[i], K_NEW);
+			double[] b = new129Pipeline(floorOcc[i], K_NEW);
+			System.out.printf("%-26s %13.4f %13.4f %12.3f %12.3f%n",
+					floorNames[i], a[0], b[0], a[1], b[1]);
+		}
+		System.out.println("   material contrast is NOT flattened: 1x glass 0.4066 > planks 0.0842(floor 0.0200)"
+				+ " = stone = 2x stone, and GAIN 0.835 / 0.610 / 0.407 / 0.250.");
+		System.out.println();
+
+		System.out.println("== 0.12.9 reverb send HF (Bug A): exp(-occ*k) used to wipe the 4 sends out ==");
+		System.out.println("   OLD = 0.12.8 traceReverb: sendCutoff = exp(-occ*k)*(1-w) + w");
+		System.out.println("   NEW = 0.12.9 Acoustics.sendCutoffFor: (0.20+0.80*exp(-occ*0.5))*(0.60+0.40*refl), floor 0.20");
+		System.out.printf("%-40s %13s %13s %10s %10s%n", "input (occ, k, reflectivity, w)", "OLD(0.12.8)", "NEW(0.12.9)", "OLD dB", "NEW dB");
+		String[] scNames = {
+				"real log line 1 (2.100, 4.5, 0.466)",
+				"real log line 2 (2.000, 4.5, 0.466)",
+				"clear sight     (0.000, 4.5, 0.600)",
+				"1x stone        (1.000, 4.5, 0.600)",
+				"glassy room     (0.000, 4.5, 0.900)",
+				"wool room       (0.000, 4.5, 0.120)",
+				"worst case      (3.000, 4.5, 0.000)",
+		};
+		double[][] scIn = {{2.100, 4.5, 0.466}, {2.000, 4.5, 0.466}, {0.000, 4.5, 0.600}, {1.000, 4.5, 0.600},
+				{0.000, 4.5, 0.900}, {0.000, 4.5, 0.120}, {3.000, 4.5, 0.000}};
+		double worstNew = 1.0;
+		for (int i = 0; i < scNames.length; i++) {
+			double oldV = sendCutoff128(scIn[i][0], scIn[i][1], 0.0);
+			double newV = sendCutoff129(scIn[i][0], 0.0, scIn[i][2]);
+			worstNew = Math.min(worstNew, newV);
+			System.out.printf("%-40s %13.4f %13.4f %10.1f %10.1f%n",
+					scNames[i], oldV, newV, db(oldV), db(newV));
+		}
+		System.out.printf("   assertion: every NEW value >= SEND_CUTOFF_MIN 0.20 -> worst = %.4f  %s%n",
+				worstNew, worstNew >= SEND_CUTOFF_MIN - 1e-9 ? "PASS" : "FAIL");
+		System.out.println("   (so the \"unless there is really no reflection at all\" exception is NOT needed:"
+				+ " the floor is a hard one. Only underwater uses a second floor of 0.10.)");
+		System.out.println();
+
 		System.out.println("(audibility is NOT verified here - only the numbers. Please judge by ear in game.)");
 	}
 }
