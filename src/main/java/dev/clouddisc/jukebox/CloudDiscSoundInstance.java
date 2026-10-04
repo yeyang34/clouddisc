@@ -26,7 +26,10 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	 * 与原版唱片对齐：vanilla 用 {@code PositionedSoundInstance.record(...)}，
 	 * 即 {@code SoundCategory.RECORDS} + volume 4.0f + pitch 1.0f + LINEAR 衰减。
 	 */
-	private static final int ATTENUATION_DISTANCE = 16;
+	// 【0.12.31】衰减距离 16 → 48 格。
+	// 16 格时远处直通早就衰减到听不见，只剩混响在响，于是离远听得见但没方位、很假。
+	// 48 格时远处仍听得见，而且走的是引擎的距离衰减（带空间定位），方位感正常。
+	private static final int ATTENUATION_DISTANCE = 48;
 
 	private final Identifier id;
 	private final Sound sound;
