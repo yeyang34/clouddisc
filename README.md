@@ -114,12 +114,17 @@
 
 <table>
 <tr>
-<td align="center" width="50%">
+<td align="center" width="33%">
 <img src="docs/images/skin-head-plain.png" width="128" alt="作者头像"><br>
 <b>_wanpi_</b><br>
 <sub>点子 · 需求 · 测试 · 服务器<br>（"唱针必须落在原版唱片机上"这条是他定的）</sub>
 </td>
-<td align="center" width="50%">
+<td align="center" width="33%">
+<img src="docs/images/skin-ayanami.png" width="128" alt="Ayanami005"><br>
+<b>Ayanami005</b><br>
+<sub>提供 AI token<br>（这个 Mod 是用他的令牌写出来的）</sub>
+</td>
+<td align="center" width="33%">
 <img src="docs/images/agent-fish.jpg" width="128" alt="那只蓝鱼"><br>
 <b>蓝色大肥鱼</b><br>
 <sub>写代码 · 查 bug · 写文档<br>（出力最多的那位，据作者说）</sub>
