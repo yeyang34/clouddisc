@@ -1047,7 +1047,7 @@ public final class Acoustics {
 						RaycastContext.FluidHandling.NONE, self));
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
 					open++;
-				} else if (hit.getPos().distanceTo(p) < 0.9) {
+				} else if (false && hit.getPos().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
 					// 【0.12.35】只忽略 0.9 格以内的命中：那是脚下的地面 / 紧贴声源的方块（"就地放置"）。
 					// 上一版写成 2.0，结果小房间的墙（常在 1.5~2 格处）也被当成"就地放置"，
 					// 于是小屋里反而完全不闷 —— 实测反馈后收紧到 0.9。
