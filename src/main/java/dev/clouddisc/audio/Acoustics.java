@@ -13,6 +13,9 @@ import net.minecraft.client.sound.SoundSystem;
 import net.minecraft.client.sound.Source;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.RaycastContext;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.util.math.Vec3d;
@@ -463,6 +466,12 @@ public final class Acoustics {
 			double relax = Math.max(0.0, 1.0 - Math.max(0.15, blockedFrac));
 			relax = Math.min(relax, 0.92);
 			occ = occMain * Math.max(0.08, 1.0 - relax);
+			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
+			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
+			//   · 双方都在开阔空间 → 遮挡 ×0.15（树后几乎不闷）
+			//   · 声源开阔、听者在室内 → ×0.85（你隔着自己家的墙听外面的唱片机，该闷）
+			//   · 声源被封闭（小屋/矿洞里的唱片机）→ ×1.0（完整物理，门开/门关照旧生效）
+			occ *= spaceGate(world, ear, center);
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
@@ -1001,6 +1010,56 @@ public final class Acoustics {
 	private static boolean strictOcclusion() {
 		CloudDiscConfig cfg = CloudDiscClient.config();
 		return cfg != null && cfg.physicsStrictOcclusion;
+	}
+
+	/**
+	 * 空间封闭度闸门（用户提出的思路，0.12.32 实现）。
+	 *
+	 * <p>从某个点向 12 个方向各打一条射线；如果大多数射线都能跑出 14 格而不撞方块，
+	 * 就认为这个点在开阔空间里（露天、树旁、一格方块旁边都算开阔 —— 声音会绕过去）。
+	 *
+	 * @return 0..1，越大表示越"该闷"
+	 */
+	private static float openness(World world, Vec3d p, Entity self) {
+		int open = 0;
+		int total = 0;
+		final double[][] dirs = {
+				{0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+				{0.7, 0.7, 0}, {-0.7, 0.7, 0}, {0, 0.7, 0.7}, {0, 0.7, -0.7}, {0.7, 0, 0.7}, {-0.7, 0, -0.7}
+		};
+		for (double[] d : dirs) {
+			total++;
+			try {
+				Vec3d to = p.add(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0);
+				BlockHitResult hit = world.raycast(new RaycastContext(p, to, RaycastContext.ShapeType.COLLIDER,
+						RaycastContext.FluidHandling.NONE, self));
+				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
+					open++;
+				}
+			} catch (Throwable ignored) {
+			}
+		}
+		return total == 0 ? 1.0f : (open / (float) total);
+	}
+
+	/** 双方空间封闭度 → 遮挡闸门（见调用处注释）。 */
+	private static float spaceGate(World world, Vec3d ear, Vec3d center) {
+		try {
+			Entity self = MinecraftClient.getInstance().player;
+			float openSrc = openness(world, center, self);
+			float openEar = openness(world, ear, self);
+			boolean srcOpen = openSrc >= 0.5f;
+			boolean earOpen = openEar >= 0.5f;
+			if (srcOpen && earOpen) {
+				return 0.15f; // 都在开阔处：树后、台阶后、一格方块后 → 几乎不闷
+			}
+			if (srcOpen) {
+				return 0.85f; // 声源在外面、你在室内 → 隔着自己的墙，该闷
+			}
+			return 1.0f; // 声源被封住（小屋/矿洞）→ 走完整物理，门开/门关照旧
+		} catch (Throwable t) {
+			return 1.0f;
+		}
 	}
 
 	private static boolean directionEnabled() {
