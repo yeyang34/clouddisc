@@ -513,7 +513,7 @@ public final class Acoustics {
 		st.tPosX = center.x;
 		st.tPosY = center.y;
 		st.tPosZ = center.z;
-		if (directionEnabled() && occ > 0.0 && rr.hasDirection) {
+		if (directionEnabled() && occ > 0.25 && rr.hasDirection && center.distanceTo(ear) <= 24.0) {
 			double len = Math.sqrt(rr.dirX * rr.dirX + rr.dirY * rr.dirY + rr.dirZ * rr.dirZ);
 			if (len >= 0.5) {
 				double ux = rr.dirX / len;
