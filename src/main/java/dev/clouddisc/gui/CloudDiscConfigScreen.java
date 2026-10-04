@@ -45,12 +45,12 @@ public class CloudDiscConfigScreen extends Screen {
 	private static final String[] SECTION_NAMES = {"播放设置", "物理声效", "网络与音源", "使用教程", "更新日志"};
 
 	private static final int ROWS = 7;
-	private static final int ROW_START = 48;
+	private static final int ROW_START = 74;
 	private static final int ROW_STEP = 18;
 	private static final int LABEL_X_OFFSET = -158;
 	private static final int FIELD_X_OFFSET = -5;
 	private static final int FIELD_WIDTH = 168;
-	private static final int TEXT_TOP = 50;
+	private static final int TEXT_TOP = 76;
 	// ---- 设计配色（深色卡片风）----
 	private static final int C_BG_BAND   = 0xE6121215; // 顶部/底部带底
 	private static final int C_ACCENT    = 0xFF4C8DFF; // 主色
@@ -348,6 +348,31 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	@Override
+	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		// 顶部标签栏：点一下切分区（与底部 ◀/▶ 等效）
+		if (button == 0 && mouseY >= 52 && mouseY < 70) {
+			int tabH = 18, gap = 6, pad = 12, totalW = 0;
+			int[] w = new int[SECTION_COUNT];
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				w[i] = this.textRenderer.getWidth(SECTION_NAMES[i]) + pad * 2;
+				totalW += w[i] + (i > 0 ? gap : 0);
+			}
+			int x = this.width / 2 - totalW / 2;
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				if (mouseX >= x && mouseX < x + w[i]) {
+					if (section != i) {
+						section = i;
+						scroll = 0;
+						clearAndInit();
+					}
+					return true;
+				}
+				x += w[i] + gap;
+			}
+		}
+		return super.mouseClicked(mouseX, mouseY, button);
+	}
+
 	public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
 		if (section >= SECTION_GUIDE) {
 			scroll -= (int) Math.signum(amount) * 3;
@@ -406,6 +431,35 @@ public class CloudDiscConfigScreen extends Screen {
 		// 底部操作带（按钮就落在这一带里）
 		context.fill(0, this.height - 40, this.width, this.height, C_BG_BAND);
 		context.fill(0, this.height - 41, this.width, this.height - 40, C_DIVIDER);
+		// ---------------- 顶部胶囊标签栏（YACL 风格：选中项高亮 + 底部指示条） ----------------
+		{
+			int tabH = 18;
+			int gap = 6;
+			int pad = 12;
+			int totalW = 0;
+			int[] w = new int[SECTION_COUNT];
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				w[i] = this.textRenderer.getWidth(SECTION_NAMES[i]) + pad * 2;
+				totalW += w[i] + (i > 0 ? gap : 0);
+			}
+			int x = cx - totalW / 2;
+			int y = 52;
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				boolean active = i == section;
+				boolean hover = mouseX >= x && mouseX < x + w[i] && mouseY >= y && mouseY < y + tabH;
+				int bg = active ? 0xFF2B4A82 : (hover ? 0x8A2A2A32 : 0x60202026);
+				context.fill(x, y, x + w[i], y + tabH, bg);
+				if (active) {
+					context.fill(x, y + tabH - 2, x + w[i], y + tabH, C_ACCENT);
+				} else {
+					context.fill(x, y + tabH - 1, x + w[i], y + tabH, 0x503A3A40);
+				}
+				int tc = active ? 0xFFFFFFFF : (hover ? 0xFFE6E6EA : 0xFF9A9AA5);
+				context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(SECTION_NAMES[i]),
+						x + w[i] / 2, y + 5, tc);
+				x += w[i] + gap;
+			}
+		}
 		// ---------------- 装饰到此为止，下面全是原有绘制 ----------------
 		this.renderBackground(context);
 		context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 8, 0xFFFFFF);
