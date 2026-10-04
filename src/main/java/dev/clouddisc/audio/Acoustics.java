@@ -456,8 +456,13 @@ public final class Acoustics {
 				}
 			}
 			int need = openPathsRequired();
-			double relax = MAX_RELAX * Math.min(1.0, openPaths / (double) need);
-			occ = occMain * (1.0 - relax);
+			// 【0.12.27】软衰减：按"没被挡的射线占比"缩放遮挡。
+			// 一盏栅栏/一格高方块只挡住少数射线 → 遮挡很小（符合"声音会绕过去"的直觉）；
+			// 整面墙挡住全部射线 → 与原来一致。
+			double blockedFrac = 1.0 - (openPaths / (double) (openPaths + 1));
+			double relax = Math.max(0.0, 1.0 - Math.max(0.15, blockedFrac));
+			relax = Math.min(relax, 0.92);
+			occ = occMain * Math.max(0.08, 1.0 - relax);
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
