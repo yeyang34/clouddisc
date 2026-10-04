@@ -79,7 +79,8 @@ public class CloudDiscConfigScreen extends Screen {
 		layLeft = pad;
 		layRight = Math.max(pad + 120, this.width - pad);
 		int avail = layRight - layLeft;
-		layFieldW = Math.max(76, Math.min(FIELD_WIDTH, (int) (avail * 0.52)));
+		// 控件列：只占右侧 40%，这样输入框/开关靠右，与底部按钮对齐成一条"控件列"
+		layFieldW = Math.max(76, Math.min(FIELD_WIDTH, (int) (avail * 0.40)));
 		layFieldX = layRight - layFieldW;
 	}
 	private int scroll;
@@ -114,8 +115,9 @@ public class CloudDiscConfigScreen extends Screen {
 		}
 
 		int y = this.height - 28;
-		int bw = Math.max(52, ((layRight - layLeft) - 3 * 4) / 4);
-		int bx = layLeft;
+		// 底部按钮与"控件列"对齐（左边缘 = 输入框左边缘），4 个等分这条列
+		int bw = Math.max(36, (layFieldW - 3 * 4) / 4);
+		int bx = layFieldX;
 		addDrawableChild(ButtonWidget.builder(Text.literal("◀ 上一节"), b -> {
 			section = (section + SECTION_COUNT - 1) % SECTION_COUNT;
 			scroll = 0;
