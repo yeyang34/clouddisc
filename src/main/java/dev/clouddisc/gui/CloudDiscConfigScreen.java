@@ -51,6 +51,12 @@ public class CloudDiscConfigScreen extends Screen {
 	private static final int FIELD_X_OFFSET = -5;
 	private static final int FIELD_WIDTH = 168;
 	private static final int TEXT_TOP = 50;
+	// ---- 设计配色（深色卡片风）----
+	private static final int C_BG_BAND   = 0xE6121215; // 顶部/底部带底
+	private static final int C_ACCENT    = 0xFF4C8DFF; // 主色
+	private static final int C_CARD      = 0xB01E1E22; // 卡片底
+	private static final int C_CARD_EDGE = 0x603A3A40; // 卡片描边
+	private static final int C_DIVIDER   = 0xFF2A2A32; // 分隔线
 	private static final int TEXT_LINE_HEIGHT = 11;
 	private static final int TEXT_BOTTOM_MARGIN = 36;
 
@@ -376,6 +382,31 @@ public class CloudDiscConfigScreen extends Screen {
 
 	@Override
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+		// ---------------- 设计层（只画装饰，不碰任何功能） ----------------
+		int cx = this.width / 2;
+		// 顶部标题带 + 主色细线
+		context.fill(0, 0, this.width, 46, C_BG_BAND);
+		context.fill(0, 45, this.width, 47, C_ACCENT);
+		// 内容区：每行一张卡片（左侧一条主色/灰色竖条做层次）
+		if (section < SECTION_GUIDE) {
+			int left = cx + LABEL_X_OFFSET - 8;
+			int right = cx + FIELD_X_OFFSET + FIELD_WIDTH + 8;
+			for (int i = 0; i < ROWS; i++) {
+				int y = ROW_START + i * ROW_STEP - 3;
+				int bottom = y + ROW_STEP - 2;
+				if (bottom > this.height - 44) {
+					break;
+				}
+				context.fill(left, y, right, bottom, C_CARD);
+				context.fill(left, y, right, y + 1, C_CARD_EDGE);
+				context.fill(left, bottom - 1, right, bottom, C_CARD_EDGE);
+				context.fill(left, y, left + 2, bottom, i % 2 == 0 ? C_ACCENT : 0x604C8DFF);
+			}
+		}
+		// 底部操作带（按钮就落在这一带里）
+		context.fill(0, this.height - 40, this.width, this.height, C_BG_BAND);
+		context.fill(0, this.height - 41, this.width, this.height - 40, C_DIVIDER);
+		// ---------------- 装饰到此为止，下面全是原有绘制 ----------------
 		this.renderBackground(context);
 		context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 8, 0xFFFFFF);
 		// 标语 + 一句话定位
