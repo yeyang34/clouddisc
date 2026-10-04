@@ -6,6 +6,7 @@
     "client":  [
                    "ChatHudMixin",
                    "ClientWorldMixin",
+                   "SoundEngineMixin",
                    "SoundLoaderMixin",
                    "SoundSystemAccessor",
                    "SoundSystemMixin",
