@@ -147,7 +147,6 @@
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | **更新日志（简版）**：说人话的版本变更 |
 | [docs/使用教程.md](docs/使用教程.md) | 图文版教程（游戏内也有同一份） |
-| [docs/设计文档.md](docs/设计文档.md) | 完整设计：四个关键判断、架构、协议、合规边界 |
 | [THIRD-PARTY.md](THIRD-PARTY.md) | 第三方组件与许可（内置 JLayer，LGPL-2.1） |
 
 ---
