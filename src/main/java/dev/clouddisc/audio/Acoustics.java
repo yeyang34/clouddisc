@@ -467,7 +467,12 @@ public final class Acoustics {
 			double blockedFrac = 1.0 - (openPaths / (double) (openPaths + 1));
 			double relax = Math.max(0.0, 1.0 - Math.max(0.15, blockedFrac));
 			relax = Math.min(relax, 0.92);
-			occ = occMain * Math.max(0.08, 1.0 - relax);
+			// 【0.12.37 紧急修】"按被挡射线占比软衰减"只在【双方都开阔】时才有意义
+			//（那种情况下面的 spaceGate 会把遮挡压到 0）。
+			// 只要 spaceGate > 0（说明声源或听者处于封闭空间），就必须采用【主射线】的遮挡：
+			// 否则"室内贴墙放唱片机、人站在室外某个角度"时，8 条偏移射线会从墙边绕过去，
+			// 把整面墙的遮挡削到 8%（实测 bug：特定范围完全不变闷）。
+			occ = occMain;
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
 			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
 			//   · 双方都在开阔空间 → 遮挡 ×0.15（树后几乎不闷）
