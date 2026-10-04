@@ -1048,10 +1048,13 @@ public final class Acoustics {
 			Entity self = MinecraftClient.getInstance().player;
 			float openSrc = openness(world, center, self);
 			float openEar = openness(world, ear, self);
-			boolean srcOpen = openSrc >= 0.5f;
-			boolean earOpen = openEar >= 0.5f;
+			// 阈值放宽到 0.45：站在树下、屋檐下、半开放走廊里都算"开阔"（不该莫名变闷）
+			boolean srcOpen = openSrc >= 0.45f;
+			boolean earOpen = openEar >= 0.45f;
 			if (srcOpen && earOpen) {
-				return 0.15f; // 都在开阔处：树后、台阶后、一格方块后 → 几乎不闷
+				// 都在开阔处（露天/树后/一格方块后/台阶后）：完全不闷 —— 声波绕过去，
+				// 这也是用户实测最想要的行为（树后不该像隔墙一样）。
+				return 0.0f;
 			}
 			if (srcOpen) {
 				return 0.85f; // 声源在外面、你在室内 → 隔着自己的墙，该闷
