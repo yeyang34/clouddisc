@@ -290,6 +290,31 @@ public final class EfxEngine {
 		}
 	}
 
+	/**
+	 * 把这条声源上的 EFX 全部摘掉，恢复"干净直通"。
+	 *
+	 * <p><b>为什么必须有它</b>：参数是一旦写上去就一直留在声源上的。
+	 * 如果玩家在歌曲播放途中把"物理声效"总开关关掉，我们只是不再往下写，
+	 * 声源上那个低通滤波<b>还会继续生效</b> —— 表现就是"关了还是闷"。
+	 */
+	public static void bypassSource(int sourceId) {
+		if (!isAvailable() || sourceId == 0) {
+			return;
+		}
+		try {
+			AL10.alSourcei(sourceId, EXTEfx.AL_DIRECT_FILTER, EXTEfx.AL_FILTER_NULL);
+			for (int i = 0; i < bands; i++) {
+				AL11.alSource3i(sourceId, EXTEfx.AL_AUXILIARY_SEND_FILTER, EXTEfx.AL_EFFECTSLOT_NULL, i, EXTEfx.AL_FILTER_NULL);
+			}
+			if (sourceId == lastSourceId) {
+				lastSourceId = 0;
+			}
+			logAlError("摘掉 EFX");
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 物理声效: 摘掉 EFX 失败（不影响播放）: {}", t.toString());
+		}
+	}
+
 	/** 打印（并清掉）OpenAL 错误队列。只在 debug 打开时刷屏。 */
 	private static void logAlError(String what) {
 		int err = AL10.alGetError();

@@ -68,6 +68,8 @@ public final class Acoustics {
 	private static final float MAX_CUTOFF_HZ = 20000.0f;
 
 	private static volatile boolean enabled = true;
+	/** 上一次 tick 时总开关是不是开的（用来捕捉"开着 → 关掉"这个瞬间，好把 EFX 摘干净）。 */
+	private static volatile boolean wasEnabled = false;
 
 	// ---------------------------------------------------------------- 声源捕获
 	private static volatile boolean nextIsOurs = false;
@@ -127,8 +129,20 @@ public final class Acoustics {
 	}
 
 	public static boolean isActive() {
+		if (!enabled()) {
+			return false;
+		}
 		State s = dspState;
-		return enabled && s != null && (s.directCutoff < 0.999f || s.sendGain[0] > 0.002f);
+		return s != null && (s.directCutoff < 0.999f || s.sendGain[0] > 0.002f);
+	}
+
+	/**
+	 * 总开关：<b>以配置文件为准</b>（{@code physicsSound}），这样"改了 JSON 直接生效"、
+	 * 重启后也能记住界面上的勾选。配置还没加载好时才用 {@link #setEnabled} 设的静态值兜底。
+	 */
+	private static boolean enabled() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		return cfg != null ? cfg.physicsSound : enabled;
 	}
 
 	// ---- 物理声效 · 第 1 步：捕获我们自己声源的 OpenAL id ----
@@ -166,8 +180,12 @@ public final class Acoustics {
 
 	public static void setEnabled(boolean value) {
 		enabled = value;
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		if (cfg != null) {
+			cfg.physicsSound = value; // 界面上的勾选直接落到配置对象（点"保存"就写盘）
+		}
 		if (!value) {
-			reset();
+			wasEnabled = true; // 让下一次 tick 走"关掉 → 摘 EFX"这条路径
 		}
 	}
 
@@ -224,10 +242,22 @@ public final class Acoustics {
 	 * @param nowTick  当前游戏刻
 	 */
 	public static void tick(BlockPos jukebox, SoundInstance instance, long nowTick) {
-		if (!enabled || jukebox == null) {
+		if (jukebox == null) {
 			return;
 		}
 		try {
+			if (!enabled()) {
+				// 播放途中被关掉：把已经挂上去的 EFX 摘干净（只做一次），
+				// 否则低通会一直留在声源上 —— 表现是"关了还是闷"。
+				if (wasEnabled) {
+					wasEnabled = false;
+					EfxEngine.bypassSource(resolveSourceId(instance));
+					reset();
+					CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效: 已关闭 → 摘掉 EFX / 恢复干净直通");
+				}
+				return;
+			}
+			wasEnabled = true;
 			if (!EfxEngine.isAvailable()) {
 				EfxEngine.ensureInit(nowTick);
 			}
