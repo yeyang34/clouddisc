@@ -1,7 +1,40 @@
-﻿CloudDisc 0.12.7 —— 物理声效桌面复算 / 静态自检的原始输出
-（生成方式：java tools/AcousticsMath.java 与 java tools/ParamSmoothTest.java，JDK 17，不需要 Minecraft）
+﻿CloudDisc 0.12.8 —— 物理声效离线复算 / 自检的原始输出
+（生成方式：JDK 17 + 项目 build 产物；OcclusionWalkTest 需要 Minecraft 运行期 classpath，见 tools\printcp.init.gradle）
 
-================ 1) tools/AcousticsMath.java ================
+================ 1) tools/OcclusionWalkTest.java（遮挡累加路径，0.12.7 就是漏了这一步） ================
+射线 (0.5, 0.6, 0.5) → (0.5, 1.62, 3.0)（距离≈2.5格，穿过 z=1、z=2 两排格子）
+
+① 1 格石头墙: 走格=4 实心=1 判定挡=1 遮挡=1.000
+  PASS  1 格石头墙 → 遮挡累积 ≈ 1.00
+  PASS  1 格石头墙 → 走格 > 0 且判定挡 = 1
+② 2 格石头墙: 走格=4 实心=2 判定挡=2 遮挡=2.000
+  PASS  2 格石头墙 → 遮挡累积 ≈ 2.00
+③ 关着的门（薄门板 3/16 厚）: 走格=4 实心=1 判定挡=1 遮挡=0.440
+  PASS  薄门板 → 遮挡累积 ≈ 0.44（射线垂直穿过门板）
+④ 关着的门（满格单盒）: 走格=4 实心=1 判定挡=1 遮挡=0.440
+  PASS  满格单盒 → 遮挡累积 ≈ 0.44（满格快捷判定生效）
+⑤ 开着的门（空形状）: 走格=4 实心=0 判定挡=0 遮挡=0.000
+  PASS  开着的门 → 遮挡累积 = 0.00
+⑥a 半砖（射线从上方过）: 走格=4 实心=1 判定挡=0 遮挡=0.000
+  PASS  半砖上方擦过 → 遮挡累积 = 0.00（但计入实心格）
+⑥b 墙在旁边的格子 (1,0,1): 走格=4 实心=0 判定挡=0 遮挡=0.000
+  PASS  射线旁边的墙 → 遮挡累积 = 0.00
+⑥c 水平薄板（射线在其上方擦过）: 走格=4 实心=1 判定挡=0 遮挡=0.000
+  PASS  与薄板平行擦过 → 遮挡累积 = 0.00
+⑦ 5 格厚石头墙: 走格=3 实心=3 判定挡=3 遮挡=3.000
+  PASS  超厚墙 → 遮挡累积被压在上限 3.00
+⑧ VoxelShape.raycast: 世界坐标=true 局部坐标=false
+  PASS  引擎求交要世界坐标（世界=命中、局部=null）
+  PASS  RayShape.hits 用世界坐标也命中
+  PASS  coversFullCell(满格) = true
+  PASS  coversFullCell(半砖) = false
+⑨ RayShape 与引擎求交的不一致项: （无）
+  PASS  RayShape.hits 与 VoxelShape.raycast 结论一致
+
+全部通过 ✓
+（几何与累加逻辑是真代码；材质值是自检里的常数，见文件头注释）
+
+================ 2) tools/AcousticsMath.java（给定遮挡 → 下发参数） ================
 openness shared airspace (representative avgShared) = 0.90
 openness floor at shared=0.90 -> 0.1897 (0.12.5 used it unconditionally)
 
@@ -69,7 +102,8 @@ door OPEN   (oak_door)       0.00     1.0000      0.0    1.000
   0.12.7 sends                 = 0.0111  (-39.1 dB)
 
 (audibility is NOT verified here - only the numbers. Please judge by ear in game.)
-================ 2) tools/ParamSmoothTest.java ================
+
+================ 3) tools/ParamSmoothTest.java（参数阶跃 → 波形是否连续） ================
 sample rate = 48000 Hz, duration = 0.6s, switch around 0.200s
 click detector = |y[n]-2y[n-1]+y[n-2]|, worst case over 64 switch phases
 0.12.7 smoothing time constant tau = 0.15s (k = 1-exp(-dt/tau))

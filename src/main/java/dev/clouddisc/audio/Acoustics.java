@@ -999,49 +999,40 @@ public final class Acoustics {
 				String.join(" ", BlockAcoustics.sampleTable(world)));
 	}
 
-	/** 沿 from → to 逐格累加材质遮挡值。 */
+	/**
+	 * 沿 from → to 逐格累加材质遮挡值。
+	 *
+	 * <p><b>0.12.8</b>：累加逻辑搬到 {@link OcclusionWalk#accumulate}（可离线单测），
+	 * 单格判定用 {@link BlockAcoustics#occlusionOnRay}（几何判定 = {@link RayShape#hits}）。
+	 * 顺带把"走了几格 / 实心几格 / 判定挡几格"记进 {@link State}，好让现场日志能自证。
+	 */
 	private static double occlusionAt(World world, Vec3d from, Vec3d to, BlockPos skip) {
-		final double[] acc = {0.0};
-		RayWalk.walk(from.x, from.y, from.z, to.x, to.y, to.z, MAX_OCC_STEPS, (x, y, z, t, nx, ny, nz) -> {
-			BlockPos p = new BlockPos(x, y, z);
+		OcclusionWalk.Result r = OcclusionWalk.accumulate(from, to, MAX_OCC_STEPS, MAX_OCC, (p, f, t) -> {
 			if (skip != null && p.equals(skip)) {
-				return true;
+				return 0.0; // 唱片机自己那一格不算（射线本来也从它内部出发）
 			}
 			BlockState bs;
 			try {
 				bs = world.getBlockState(p);
 			} catch (Throwable e) {
-				return false;
+				return 0.0;
 			}
-			if (bs.isAir()) {
-				return true;
+			double v = BlockAcoustics.occlusionOnRay(bs, world, p, f, t);
+			if (v > 0.0) {
+				noteProbe(bs, world, p); // 诊断：这次真的算它了（① 材质探针）
 			}
-			boolean fluid = false;
-			try {
-				fluid = !bs.getFluidState().isEmpty();
-			} catch (Throwable ignored) {
-				// 取不到就当不是流体
-			}
-			if (!fluid) {
-				// 0.12.7：判据从"这一格有没有碰撞体积"改成"**这条射线有没有真的命中它的碰撞形状**"。
-				// 理由（Bug 1 的第二半根因）：关着的门有碰撞体积，但老实现只把它当成
-				// "非完整方块"再打对折 → 0.55×0.8×0.5 = 0.22，截止 0.37，"几乎不闷"。
-				// 现在：命中门板 → 按材质值 0.44 累加；门开着（形状为空）→ 0；
-				//       楼梯/栅栏的缝（射线从空隙过）→ 0，不再整格当成实心白算一笔。
-				try {
-					if (!BlockAcoustics.blocksRay(bs, world, p, from, to)) {
-						return true;
-					}
-				} catch (Throwable e) {
-					return true; // 判定失败：保守地不累加（宁可轻一点，也不要凭形状猜）
-				}
-			}
-			noteProbe(bs, world, p); // 诊断：这次真的算它了（① 材质探针）
-			acc[0] += BlockAcoustics.occlusionOf(bs);
-			return acc[0] < MAX_OCC;
+			return v;
 		});
-		return Math.min(acc[0], MAX_OCC);
+		lastWalkWalked = r.walkedCells;
+		lastWalkSolid = r.solidCells;
+		lastWalkHit = r.hitCells;
+		return r.occlusion;
 	}
+
+	// 0.12.8 诊断：最近一次"主射线"的走格统计（供 physicsSoundDebug 日志自证）
+	private static volatile int lastWalkWalked;
+	private static volatile int lastWalkSolid;
+	private static volatile int lastWalkHit;
 
 	private static boolean strictOcclusion() {
 		CloudDiscConfig cfg = CloudDiscClient.config();
@@ -1183,16 +1174,35 @@ public final class Acoustics {
 		st.lastLogTick = nowTick;
 		Vec3d ear = earOf(self);
 		double dist = ear.distanceTo(centerOf(jukebox));
-		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: source={} EFX={} 遮挡累积={} 主射线遮挡={} 通透通路={}/{} 放宽={} 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
+		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: ver={} source={} EFX={} 遮挡累积={} 主射线遮挡={} 主射线走格={} 实心格={} 判定挡={} 通透通路={}/{} 放宽={} 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
 						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格",
+				version(),
 				sourceId,
 				EfxEngine.isAvailable() ? "可用(" + EfxEngine.bands() + "段)" : "不可用→DSP",
-				fmt(st.occlusionAcc), fmt(st.lastOccMain), st.lastOpenPaths, OPEN_PATH_TOTAL, fmt(st.lastRelax),
+				fmt(st.occlusionAcc), fmt(st.lastOccMain), lastWalkWalked, lastWalkSolid, lastWalkHit,
+				st.lastOpenPaths, OPEN_PATH_TOTAL, fmt(st.lastRelax),
 				fmt(st.lastK),
 				fmt(st.directCutoff), fmt(st.directGain), fmt(st.openness),
 				fmt1(dist), st.underwater, fmt1(offsetOf(st, jukebox)), fmt3(st.evalNanos / 1.0e6),
 				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath));
 	}
+
+	/** Mod 版本号（日志里带上：排障时一眼看出用户到底跑的哪一版）。 */
+	public static String version() {
+		String v = cachedVersion;
+		if (v == null) {
+			try {
+				v = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer("clouddisc")
+						.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("?");
+			} catch (Throwable t) {
+				v = "?";
+			}
+			cachedVersion = v;
+		}
+		return v;
+	}
+
+	private static volatile String cachedVersion;
 
 	private static double offsetOf(State st, BlockPos jukebox) {
 		if (!st.posSeeded) {

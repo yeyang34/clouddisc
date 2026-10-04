@@ -115,17 +115,16 @@ public final class BlockAcoustics {
 	}
 
 	/**
-	 * <b>0.12.7 新增</b>：这一格确实在射线上（DDA 已确认），射线是否<b>真的命中它的碰撞形状</b>。
+	 * <b>0.12.7 新增 / 0.12.8 加固</b>：这一格确实在射线上（DDA 已确认），射线是否<b>真的命中它的碰撞形状</b>。
 	 *
 	 * <p>为什么需要它：DDA 只告诉我们"射线穿过了哪一格"，而"格子里有碰撞体积"不等于
 	 * "射线被挡住了" —— 楼梯、栅栏、玻璃板、活板门都有碰撞体积，但射线完全可能从缝隙里过。
 	 * 老实现把这种格子整格当成实心累加，再靠 {@code isOpaqueFullCube} 打个对折来"补偿"，
 	 * 结果就是"关着的门被判成一条缝"。
 	 *
-	 * <p>顺带这也是"关着的门 / 开着的门"的判据：开着的门碰撞形状为空 → 返回 false → 不累加；
-	 * 关着的门碰撞形状非空且射线穿过门板 → 返回 true → 按材质值累加。
-	 *
-	 * @return true = 这条射线被本格的材料挡住了
+	 * <p><b>0.12.8 的加固</b>：真正的几何判定在 {@link RayShape#hits}——<b>满格体素（石头/玻璃/关着的门）
+	 * 直接判挡，根本不依赖求交实现</b>；只有不满格/多盒的形状（楼梯、栅栏、半砖…）才逐盒求交。
+	 * 这样"一格厚墙/一扇关着的门"不可能因为某个引擎分支不成立而静默变成"不挡"。
 	 */
 	public static boolean blocksRay(BlockState state, BlockView world, BlockPos pos, Vec3d from, Vec3d to) {
 		VoxelShape shape;
@@ -134,14 +133,46 @@ public final class BlockAcoustics {
 		} catch (Throwable t) {
 			return true; // 取不到形状：保守地按"挡"处理（宁可闷一点，也不要漏挡）
 		}
-		if (shape.isEmpty()) {
-			return false;
+		return RayShape.hits(shape, pos, from, to);
+	}
+
+	/**
+	 * <b>0.12.8 新增</b>：这一格对这条射线的遮挡贡献，<b>生产路径与离线自检共用同一个函数</b>
+	 * （见 {@code tools/OcclusionWalkTest.java}）。
+	 *
+	 * @return {@code > 0} = 挡住（累加这个材质值）；{@code 0} = 空气/空碰撞形状；
+	 *         {@code -1} = 有碰撞形状但射线没被打到（楼梯的缝…）—— 不累加，只计入"实心格"统计
+	 */
+	public static double occlusionOnRay(BlockState state, BlockView world, BlockPos pos, Vec3d from, Vec3d to) {
+		if (state == null || state.isAir()) {
+			return 0.0;
 		}
+		boolean fluid = false;
 		try {
-			return shape.raycast(from, to, pos) != null;
-		} catch (Throwable t) {
-			return true; // 求交失败同样保守处理
+			fluid = !state.getFluidState().isEmpty();
+		} catch (Throwable ignored) {
+			// 取不到就当不是流体
 		}
+		if (!fluid) {
+			// 几何判定：射线真的被这一格的碰撞形状挡住才算
+			if (!blocksRay(state, world, pos, from, to)) {
+				// 安全网（0.12.7 的教训）：万一碰撞形状取不到/被别的东西弄成空，
+				// 而方块本身又是"不透明完整方块"（石头/木板/原木…），仍然按"挡"算。
+				// 正常情况永远走不到这里（实心方块一定有满格碰撞形状）；
+				// 这一条只是为了让"整条遮挡链路静默归零"不可能再发生。
+				boolean opaqueFullCube = false;
+				try {
+					opaqueFullCube = state.isOpaqueFullCube(world, pos);
+				} catch (Throwable ignored) {
+					opaqueFullCube = false;
+				}
+				if (!opaqueFullCube) {
+					return -1.0;
+				}
+			}
+		}
+		float occ = occlusionOf(state);
+		return occ > 0.0f ? occ : -1.0;
 	}
 
 	/** 反射率（混响射线用）。 */
