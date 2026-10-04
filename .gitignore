@@ -32,3 +32,11 @@ config/
 
 # 自建解析服务（个人自用，不进公开仓库）
 server-resolver/
+# ---- 内部文档：只保留在本地，不进公开仓库 ----
+/docs/CHANGELOG-内部.md
+/docs/开发日志.md
+/docs/实测数据.md
+/docs/物理声效实现计划.md
+/docs/发布到GitHub.md
+/docs/*自检输出*.txt
+/docs/*复算*.txt

@@ -146,10 +146,7 @@
 | 文件 | 内容 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | **更新日志（简版）**：说人话的版本变更 |
-| [docs/CHANGELOG-内部.md](docs/CHANGELOG-内部.md) | **更新日志（详细版）**：每个 bug 的根因与实测数据 |
 | [docs/使用教程.md](docs/使用教程.md) | 图文版教程（游戏内也有同一份） |
-| [docs/开发日志.md](docs/开发日志.md) | 调试实录：每个结论是怎么查出来的（含误判与方法论） |
-| [docs/实测数据.md](docs/实测数据.md) | 实测数字：同步精度、中途加入、未验证项清单 |
 | [docs/设计文档.md](docs/设计文档.md) | 完整设计：四个关键判断、架构、协议、合规边界 |
 | [THIRD-PARTY.md](THIRD-PARTY.md) | 第三方组件与许可（内置 JLayer，LGPL-2.1） |
 
