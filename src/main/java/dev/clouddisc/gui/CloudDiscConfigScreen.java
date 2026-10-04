@@ -74,6 +74,8 @@ public class CloudDiscConfigScreen extends Screen {
 	private int layFieldX;
 	private int layFieldW;
 	private int layRowStep = 18;
+	// 控件高度：跟着行距走。行距被窗口高度压小时，控件也变矮，保证"每行的字和控件严丝合缝"。
+	private int layRowH = 20;
 
 	private void computeLayout() {
 		int pad = 14;
@@ -85,6 +87,7 @@ public class CloudDiscConfigScreen extends Screen {
 		layFieldX = layRight - layFieldW;
 		// 行距随窗口高度自适应：保证 9 行都在底部按钮带之上（按钮带从 height-40 开始）
 		layRowStep = Math.max(12, Math.min(18, (this.height - 118) / ROWS));
+		layRowH = Math.max(11, Math.min(20, layRowStep - 2));
 	}
 	private int scroll;
 	private List<String> textLines = List.of();
@@ -191,7 +194,7 @@ public class CloudDiscConfigScreen extends Screen {
 		row(6, "方向性（声音从拐角绕过来）", toggle(6, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
 		row(7, "调试日志 + 材质探针（每轮打印命中方块）", toggle(7, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
 		// 第 9 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
-		int y = ROW_START + 8 * layRowStep + 6;
+		int y = ROW_START + 8 * layRowStep + Math.max(1, (layRowH - 9) / 2);
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
@@ -224,7 +227,7 @@ public class CloudDiscConfigScreen extends Screen {
 		int y = ROW_START + index * layRowStep;
 		int maxLabelW = Math.max(24, layFieldX - 10 - (layLeft + 6));
 		String shown = this.textRenderer.trimToWidth(label, maxLabelW);
-		labels.add(new Label(Text.literal(shown), layLeft + 6, y + 6));
+		labels.add(new Label(Text.literal(shown), layLeft + 6, y + Math.max(1, (layRowH - 9) / 2)));
 		addDrawableChild(widget);
 	}
 
@@ -246,7 +249,7 @@ public class CloudDiscConfigScreen extends Screen {
 			boolean next = !get.getAsBoolean();
 			set.accept(next);
 			b.setMessage(Text.literal(next ? "开" : "关"));
-		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
 	private ButtonWidget cycleInt(int index, int[] values, IntSupplier get, IntConsumer set) {
@@ -261,7 +264,7 @@ public class CloudDiscConfigScreen extends Screen {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(String.valueOf(values[idx[0]])));
-		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
 	private ButtonWidget cycleFloat(int index, float[] values, DoubleSupplier get, DoubleConsumer set) {
@@ -276,7 +279,7 @@ public class CloudDiscConfigScreen extends Screen {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(fmt(values[idx[0]])));
-		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
 	private ButtonWidget cycleString(int index, String[] values, Supplier<String> get, Consumer<String> set) {
@@ -291,7 +294,7 @@ public class CloudDiscConfigScreen extends Screen {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
 			b.setMessage(Text.literal(values[idx[0]]));
-		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
+		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
 	/** 从 httpHeaders 里取出 X-Token 的值（界面上显示用）。 */
