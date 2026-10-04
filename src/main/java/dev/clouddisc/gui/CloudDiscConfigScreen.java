@@ -104,6 +104,9 @@ public class CloudDiscConfigScreen extends Screen {
 	@Override
 	protected void init() {
 		computeLayout();
+		toggleGetters.clear();
+		toggleSetters.clear();
+		computeLayout();
 		clearChildren();
 		labels.clear();
 
@@ -247,11 +250,14 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	private ButtonWidget toggle(int index, BooleanSupplier get, Consumer<Boolean> set) {
-		return ButtonWidget.builder(Text.literal(get.getAsBoolean() ? "开" : "关"), b -> {
-			boolean next = !get.getAsBoolean();
-			set.accept(next);
-			b.setMessage(Text.literal(next ? "开" : "关"));
+		// 登记这一行是开关；真正的样子由 render() 自绘胶囊，点击由 mouseClicked 处理。
+		// 保留一个不可见按钮占位（不参与绘制与点击），避免 row() 里 addDrawableChild 拿到 null。
+		toggleGetters.put(index, get);
+		toggleSetters.put(index, set);
+		ButtonWidget placeholder = ButtonWidget.builder(Text.literal(""), b -> {
 		}).dimensions(layFieldX, rowY(index), layFieldW, 20).build();
+		placeholder.visible = false;
+		return placeholder;
 	}
 
 	private ButtonWidget cycleInt(int index, int[] values, IntSupplier get, IntConsumer set) {
