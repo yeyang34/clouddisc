@@ -24,7 +24,7 @@ public final class CloudDiscConfig {
 	 * 新版本把默认值改成 true 之后，老用户仍然读到 false，表现为"功能像没实现"。
 	 * 有了版本号就能在老配置上做一次迁移。
 	 */
-	public static final int CURRENT_VERSION = 6;
+	public static final int CURRENT_VERSION = 5;
 
 	private static CloudDiscConfig instance;
 
@@ -137,26 +137,16 @@ public final class CloudDiscConfig {
 	 */
 	public float physicsAbsorption = 4.5f;
 	/**
-	 * 需要几条"通透通路"才算真的漏音（默认 <b>6</b>，范围 1~8；0.12.6 是 3）。
+	 * 需要几条"通透通路"才算真的漏音（默认 <b>3</b>，范围 1~9）。
 	 * <p>非严格模式下，除了"唱片机 → 耳朵"那条主射线，还会试两个端点各偏移 ±1 格的 8 条平行射线。
 	 * <ul>
-	 *   <li>0.12.5 是<b>取最小值</b> —— 一条缝就命中 0，遮挡被抹平，效果全没。</li>
+	 *   <li>0.12.5 的做法是<b>取最小值</b> —— 一条缝就命中 0，遮挡被抹平，效果全没（"有些场景听不出来"）。</li>
 	 *   <li>0.12.6 改成<b>数通路</b>：{@code 放宽 = 85% × min(1, 通路数 / 本值)}，
-	 *       但门槛只有 3/8，而且一过门槛就砍掉 85% 的遮挡 —— 结果是
-	 *       <b>一扇关着的门 / 一格厚的墙旁边也能凑出 3 条偏移通路</b>，门关着和门开着听感一样。</li>
-	 *   <li>0.12.7：<b>只有达到本值（默认 6/8）才放宽，且最多削掉 {@code physicsOcclusionRelax}（默认 40%）</b>；
-	 *       达不到就<b>一分不放宽</b>。调大 = 更不容易透。</li>
+	 *       且最多只能把遮挡降到原值的 15%。所以 1~2 条缝只放宽一点，3 条以上才明显变通透。</li>
 	 * </ul>
+	 * 调大 = 更不容易透（更像"严格遮挡"）；调小到 1 = 接近 0.12.5 的老行为。
 	 */
-	public int physicsOcclusionPaths = 6;
-	/**
-	 * 放宽幅度上限（默认 <b>0.40</b> = 最多把遮挡削掉四成；范围 0.0~0.60）。
-	 * <p>只有"通透通路数 ≥ {@code physicsOcclusionPaths}"时才用得上：
-	 * 刚好过门槛给最小一档，8 条全通透才给到这个上限。
-	 * <p>设 <b>0</b> = 完全不放宽（等同"严格遮挡"，但只在漏音侧生效，拐角/门缝也一律当墙）。
-	 * <p>0.12.6 的这个数是写死的 0.85（即最多只保留 15% 遮挡），是"门关着也几乎不闷"的直接原因。
-	 */
-	public float physicsOcclusionRelax = 0.40f;
+	public int physicsOcclusionPaths = 3;
 	/**
 	 * 精度：混响射线数（默认 32）。
 	 * <p>越大越准、越贵。主线程预算约 1ms/次评估（每 4 刻评估一次），
@@ -298,12 +288,6 @@ public final class CloudDiscConfig {
 		// v5（0.12.6）新增 physicsAbsorption / physicsOcclusionPaths，且改写了 physicsSoundLevel 的语义。
 		// 两个新字段的 Java 默认值就是想要的默认值（Gson 对缺失字段保留 Java 初始值），所以不需要迁移逻辑；
 		// 只是把文件重写一遍，让新键出现在用户的 clouddisc.json 里，方便手改。
-		// v6（0.12.7）：漏音放宽规则从"3 条就砍 85%"改成"≥6/8 才放宽、且最多削 40%"。
-		// 老配置里写着的 3（0.12.6 的默认值）在新规则下依然太松（3/8 就放行），所以这里迁到 6；
-		// 用户如果自己调过（>3）就尊重用户的值，不动。
-		if (configVersion < 6 && physicsOcclusionPaths <= 3) {
-			physicsOcclusionPaths = 6;
-		}
 		configVersion = CURRENT_VERSION;
 	}
 

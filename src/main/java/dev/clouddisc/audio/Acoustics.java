@@ -13,6 +13,8 @@ import net.minecraft.client.sound.SoundSystem;
 import net.minecraft.client.sound.Source;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import org.lwjgl.openal.AL10;
@@ -88,66 +90,15 @@ public final class Acoustics {
 	private static final float OPENNESS_GATE_OCC = 0.6f;
 	/** 偏移射线算作"一条通透通路"的遮挡阈值：≤ 它就认为这条线是通的。 */
 	private static final double OPEN_PATH_OCC = 0.05;
-	/** 偏移射线的总数（两端各 ±1 格的 2×2×2 = 8 个对角偏移）。 */
-	private static final int OPEN_PATH_TOTAL = 8;
 	/**
-	 * 0.12.7：<b>放宽（漏音）的门槛与上限</b>。
-	 * <p>0.12.6 的公式是 {@code 放宽 = 0.85 × min(1, 通路数/3)}，且直接 {@code occ = occMain × (1-放宽)}：
-	 * <b>只要 3 条偏移通路通透，主射线算出来的遮挡就只剩 15%</b>。
-	 * 问题在于"1 格厚的墙/一扇门"旁边本来就很容易凑出 3 条没被挡到的偏移线
-	 * （偏移是整条线平移，擦着墙边、过门口、过墙角都会变成"通透"），
-	 * 于是门关着（0.44）和门开着（0）在听感上都塌成"几乎不闷"。
-	 * <p>现在两条约束：<b>①只有大多数偏移通路都通透（默认 ≥6/8）才放宽；②放宽幅度有上限（默认 40%）</b>。
-	 * 达不到门槛 → <b>完全不放宽</b>。
+	 * 放宽幅度上限：最多把遮挡降到 {@code 1 - MAX_RELAX} = 15%。
+	 * <p>0.12.5 是"8 个偏移点取最小值"—— 只要有一条缝，遮挡直接归零、效果全没了。
 	 */
+	private static final double MAX_RELAX = 0.40;
+	/** 默认需要多少条通透通路才算"真的漏音"（可配 {@code physicsOcclusionPaths}）。 */
 	private static final int DEFAULT_OPEN_PATHS = 6;
 	private static final int OPEN_PATHS_MIN = 1;
-	private static final int OPEN_PATHS_MAX = OPEN_PATH_TOTAL;
-	/** 默认的放宽幅度上限（可配 {@code physicsOcclusionRelax}）：最多把遮挡削到 60%。 */
-	private static final double DEFAULT_RELAX_MAX = 0.40;
-	private static final double RELAX_MAX_MIN = 0.0;
-	private static final double RELAX_MAX_MAX = 0.60;
-
-	// ---------------------------------------------------------------- 0.12.9：修 Bug A（混响发送高频）+ 可听下限
-	/**
-	 * 0.12.9 <b>Bug A</b>：混响发送高频的<b>硬下限</b>。
-	 * <p>0.12.8 现场日志 {@code sendCutoff=[0.001, 0.001, 0.001, 0.001]}：4 路混响发送自己的低通
-	 * 被压到 0.001（约 -60 dB）⇒ <b>混响完全听不见</b>（用户："直接整体全部效果都没了"）。
-	 * <p>{@value}（-14 dB 高频）的意思是"混响可以变暗，但绝不允许被掐死"。
-	 * 只有"强度=0"让发送增益归零、以及水下的第二道下限（{@link #SEND_CUTOFF_MIN_UNDERWATER}）会低于它。
-	 */
-	private static final float SEND_CUTOFF_MIN = 0.20f;
-	/** 0.12.9：水下再压一档的<b>第二道</b>下限（水下是有意的极端档，但仍不许掐成静音）。 */
-	private static final float SEND_CUTOFF_MIN_UNDERWATER = 0.10f;
-	/**
-	 * 0.12.9 <b>Bug A</b>：混响高频受"直通遮挡"影响的系数。
-	 * <p>为什么不能沿用直通那条链路的 {@link #ABSORPTION_DEFAULT}(=4.5)：
-	 * {@code exp(-occ*k)} 是给<b>直通穿墙</b>调的（0.12.6 为了"隔墙一耳就闷"），occ=2.1 时它是
-	 * {@code exp(-9.45) = 7.9e-5}。混响发送走的是 aux send，<b>不穿那堵墙</b>，
-	 * 拿它当低通就是把整条发送掐死。
-	 * <p>现在 0.5：occ=2.1 → 0.35（混响跟着闷一点），occ=0 → 1.0（通畅时一点也不压）。
-	 */
-	private static final float SEND_OCC_K = 0.5f;
-	/**
-	 * 0.12.9 <b>Bug A</b>：每层反射面的"高频反射增益" = {@code HF_REFL_BASE + (1-HF_REFL_BASE) × 反射率}。
-	 * <p>这才是"混响的高频被吸掉多少"的物理量（原来用的是直通遮挡，是两回事）：
-	 * 石头(0.60)→0.84、玻璃(0.90)→0.96、羊毛(0.12)→0.65、完全吸声(0)→0.60。
-	 * 也就是"吸声的房间余响更暗，但一定还在"。
-	 */
-	private static final float HF_REFL_BASE = 0.60f;
-	/**
-	 * 0.12.9：直通的<b>可听下限</b>（用户要求"明显，不是消失"）。
-	 * <p>0.12.8 现场：两层石头墙 → 直通增益 0.153（-16.3 dB）、GAINHF 0.006（-44 dB），
-	 * 用户原话"已经几乎听不见"。
-	 * <ul>
-	 *   <li>增益 {@code ≥ 0.25}（-12.0 dB）：明显变小，但内容还听得见；<b>仍低于一层玻璃的 0.41</b>，
-	 *       所以"玻璃 / 木板 / 石头 / 两层石头"的材质与厚度对比不会被抹平。</li>
-	 *   <li>高频 {@code ≥ 0.02}（-34.0 dB）：仍然是"隔着厚墙"的闷，只是不再闷到像被静音。</li>
-	 * </ul>
-	 * <p>水下（×0.1 / ×0.3）<b>故意</b>会低于这两个下限 —— 那是另一个开关，语义不同。
-	 */
-	private static final float MIN_AUDIBLE_DIRECT_GAIN = 0.25f;
-	private static final float MIN_AUDIBLE_DIRECT_CUTOFF = 0.02f;
+	private static final int OPEN_PATHS_MAX = 9;
 
 	private static final double AIR_START = 12.0;
 	/** 沿连线最多穿过多少格（性能上限）。
@@ -170,21 +121,6 @@ public final class Acoustics {
 	private static volatile boolean enabled = true;
 	/** 上一次 tick 时总开关是不是开的（用来捕捉"开着 → 关掉"这个瞬间，好把 EFX 摘干净）。 */
 	private static volatile boolean wasEnabled = false;
-
-	// ---------------------------------------------------------------- 0.12.7：退场（关开关）
-	/**
-	 * 关掉总开关后，把参数平滑到"直通"需要多少刻（8 刻 = 0.4 秒）才真正摘掉 EFX。
-	 * <p>为什么要这一步：{@code AL_DIRECT_FILTER = NULL} / 摘发送都是<b>拓扑突变</b>，
-	 * 在"正闷着"的时候一刀摘掉，音色一步从闷跳回透亮 —— 这一下本身就是可闻的爆音。
-	 * 现在先把截止/增益平滑推到 1/1、发送推到 0（时间常数仍是 {@link #SMOOTH_SECONDS}），
-	 * 推完再摘，听感是"闷 → 慢慢变亮"，没有台阶。
-	 */
-	private static final int DISENGAGE_TICKS = 8;
-	private static volatile int disengageSource = 0;
-	private static volatile long disengageEndTick = Long.MIN_VALUE / 2;
-
-	/** 参数写入的限频（刻）：0.12.7 起每 3 刻（150ms）才写一次 OpenAL，减少 zipper 噪声。 */
-	private static final int WRITE_INTERVAL_TICKS = 3;
 
 	// ---------------------------------------------------------------- 声源捕获
 	private static volatile boolean nextIsOurs = false;
@@ -213,8 +149,6 @@ public final class Acoustics {
 		float occlusionAcc;
 		/** 0.12.6 诊断：主射线之外的 8 条偏移射线里，有几条"通透"（≤ {@link #OPEN_PATH_OCC}）。 */
 		int lastOpenPaths;
-		/** 0.12.7 诊断：本轮实际用掉的放宽幅度（0 = 完全没放宽；0.40 = 削掉四成遮挡）。 */
-		float lastRelax;
 		/** 0.12.6 诊断：本轮实际用的遮挡陡度 k（= 配置值 x 强度）。 */
 		float lastK;
 		/** 0.12.6 诊断：主射线（未放宽）的遮挡值，用来对比"放宽了多少"。 */
@@ -242,29 +176,15 @@ public final class Acoustics {
 		/** 诊断：当前是否在水下。 */
 		boolean underwater;
 		boolean seeded = false;
-		/** 0.12.7：这条声源上是否已经写过至少一次 EFX 参数（第一次先写"直通"，避免开局一步跳到满遮挡）。 */
-		boolean wroteOnce = false;
-		/** 0.12.7：上一次写 AL_POSITION 的刻（位置写入限频用）。 */
-		long lastPosWriteTick = Long.MIN_VALUE / 2;
 	}
 
 	private static final Map<Integer, State> STATES = new HashMap<>();
 	/** DSP 回退路径当前跟随的状态（最后一个被评估的声源）。 */
 	private static volatile State dspState = new State();
-	/** 0.12.7：第一次给新声源接线时用的"直通"发送参数（见 {@link State#wroteOnce}）。 */
-	private static final float[] NEUTRAL_SEND_GAIN = new float[EfxEngine.MAX_BANDS];
-	private static final float[] NEUTRAL_SEND_CUTOFF = {1.0f, 1.0f, 1.0f, 1.0f};
 
 	private Acoustics() {
 	}
 
-	/**
-	 * DSP 兜底链路"当前是不是真的在压声音"（只给诊断/文档用）。
-	 *
-	 * <p><b>0.12.7</b>：<b>不再</b>用它决定"要不要接通 DSP 链路" —— 那样会在一开一关之间
-	 * 把一阶低通的内部状态清掉，重新接通时从 0 开始 = 一个阶跃（就是那声 "bip"）。
-	 * 链路现在是<b>全程接通</b>的，参数自己滑到"全通"（见 {@link #filterMono}）。
-	 */
 	public static boolean isActive() {
 		if (!enabled()) {
 			return false;
@@ -386,16 +306,14 @@ public final class Acoustics {
 		}
 		try {
 			if (!enabled()) {
-				// 播放途中被关掉：**不能一刀摘掉 EFX**（拓扑突变 = 一下可闻的爆音），
-				// 0.12.7 改成"先把参数平滑到直通，推完了再摘"（见 DISENGAGE_TICKS）。
+				// 播放途中被关掉：把已经挂上去的 EFX 摘干净（只做一次），
+				// 否则低通会一直留在声源上 —— 表现是"关了还是闷"。
 				if (wasEnabled) {
 					wasEnabled = false;
-					disengageSource = resolveSourceId(instance);
-					disengageEndTick = nowTick + DISENGAGE_TICKS;
-					CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效: 已关闭 → 先把参数平滑到直通，约 {} 刻后摘掉 EFX",
-							DISENGAGE_TICKS);
+					EfxEngine.bypassSource(resolveSourceId(instance));
+					reset();
+					CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效: 已关闭 → 摘掉 EFX / 恢复干净直通");
 				}
-				tickDisengage(instance, jukebox, nowTick);
 				return;
 			}
 			wasEnabled = true;
@@ -438,20 +356,11 @@ public final class Acoustics {
 			// ③ 应用层
 			Vec3d center = centerOf(jukebox);
 			if (directionEnabled()) {
-				applyPosition(sourceId, st, center.x, center.y, center.z, nowTick);
+				applyPosition(sourceId, st, center.x, center.y, center.z);
 			}
 			if (EfxEngine.isAvailable()) {
 				syncReverb(st);
-				if (!st.wroteOnce) {
-					// 0.12.7：第一次给这条声源接线时**先写成直通**（截止/增益 = 1、发送 = 0）。
-					// 否则"引擎默认的全通 → 立刻套上当前遮挡值"就是一个阶跃，
-					// 正好落在刚开始播放的前 0.3 秒里（用户最容易听出来的位置）。
-					// 写成直通之后，smooth() 会按 0.15s 的时间常数把参数滑到目标值。
-					st.wroteOnce = true;
-					EfxEngine.applyToSource(sourceId, 1.0f, 1.0f, NEUTRAL_SEND_GAIN, NEUTRAL_SEND_CUTOFF, nowTick);
-				} else {
-					EfxEngine.applyToSource(sourceId, st.directCutoff, st.directGain, st.sendGain, st.sendCutoff, nowTick);
-				}
+				EfxEngine.applyToSource(sourceId, st.directCutoff, st.directGain, st.sendGain, st.sendCutoff);
 				dspState = null; // EFX 生效时不碰 DSP
 			} else {
 				dspState = st;   // 回退：把参数交给 filterMono
@@ -481,77 +390,6 @@ public final class Acoustics {
 		}
 	}
 
-	// ---------------------------------------------------------------- 0.12.9：可离线复算的纯函数（生产与自检共用）
-	/**
-	 * 直通链路的输出（{@code AL_LOWPASS_GAINHF} = {@code cutoff}、{@code AL_LOWPASS_GAIN} = {@code gain}）。
-	 * <p><b>0.12.9 为什么抽成记录类型</b>：让 {@code tools/PhysicsParamsTest.java} 能<b>直接调用生产代码</b>，
-	 * 而不是"把公式照抄一遍"—— 0.12.7 的教训正是"自检抄公式，抄错了也看不出来"。
-	 */
-	public record DirectParams(float cutoff, float gain) {
-	}
-
-	/**
-	 * <b>0.12.9：直通参数（纯函数；生产路径 {@link #evaluate} 与离线自检共用同一个实现）。</b>
-	 *
-	 * @param occ       沿连线累加（含放宽）后的遮挡值
-	 * @param k         遮挡陡度 = {@code physicsAbsorption × physicsSoundLevel}（默认 4.5）
-	 * @param avgShared 共享空气空间（开阔度）0..1
-	 * @param dist      唱片机到耳朵的距离（格）
-	 */
-	public static DirectParams directParams(double occ, float k, float avgShared, double dist) {
-		float cutoffNoAir = (float) Math.exp(-occ * k);
-		// 开阔度修正：同一片开阔空间里，声音能从别处绕过来 → 直通不该被压得太死
-		// （对应 SPR 的 directCutoff = max(sqrt(averageSharedAirspace)*0.2, directCutoff)，
-		//  但加了门槛：遮挡达到 OPENNESS_GATE_OCC 之后，开阔度一律不许抬截止。）
-		float gate = (float) clampD(occ / OPENNESS_GATE_OCC, 0.0, 1.0);
-		float opennessFloor = (float) (OPENNESS_FLOOR_COEF * Math.sqrt(Math.max(0.0f, avgShared)))
-				* (1.0f - gate);
-		float cutoffWithShared = Math.max(opennessFloor, cutoffNoAir);
-		float gain = (float) Math.pow(cutoffWithShared, DIRECT_GAIN_EXP);
-		// 空气吸收：按距离衰减高频（"远处高频先没"）。只压高频，不压总增益
-		// —— 总增益本来就有 OpenAL 的距离衰减在管。
-		float air = (float) Math.pow(0.9, Math.max(0.0, (dist - AIR_START) / 3.0));
-		float cutoff = Math.max(MIN_DIRECT_CUTOFF, cutoffWithShared * air);
-		// ---- 0.12.9 可听下限：隔墙再厚，也留一条"听得见但很闷"的路 ----
-		// 0.12.8 现场：两层石头墙 → 直通增益 0.153、GAINHF 0.006，用户听成"几乎听不见"。
-		// 这里只给"遮挡算出来的值"设下限；水下（调用方再乘 0.1 / 0.3）故意允许更低。
-		gain = Math.max(gain, MIN_AUDIBLE_DIRECT_GAIN);
-		cutoff = Math.max(cutoff, MIN_AUDIBLE_DIRECT_CUTOFF);
-		return new DirectParams(clamp01(cutoff), clamp01(gain));
-	}
-
-	/**
-	 * <b>0.12.9 Bug A 的修复：混响发送的高频增益（纯函数；生产与离线自检共用同一个实现）。</b>
-	 *
-	 * <h2>旧公式（0.12.6~0.12.8，写在 {@code traceReverb} 里）错在哪</h2>
-	 * <pre>
-	 *   occCut = exp(-occ × k)                 // k = physicsAbsorption = 4.5，本来是给"直通穿墙"调的
-	 *   sendCutoff[i] = occCut × (1 - w_i) + w_i
-	 * </pre>
-	 * occ=2.1（两层石头墙）时 {@code occCut = exp(-9.45) = 7.9e-5}；只要"绕过来的声音"权重
-	 * {@code w_i = 0}（现场日志 {@code 开阔度=0.000}），4 路发送的低通就全塌到 7.9e-5
-	 * —— 现场下发值 {@code 0.001}，混响等于被自己掐掉。
-	 *
-	 * <h2>新公式（0.12.9）</h2>
-	 * <pre>
-	 *   occSend = SEND_CUTOFF_MIN + (1 - SEND_CUTOFF_MIN) × exp(-occ × SEND_OCC_K)   // 比直通温和得多
-	 *   base    = occSend × (1 - w) + w                                             // 绕过来的声音不受遮挡
-	 *   mat     = HF_REFL_BASE + (1 - HF_REFL_BASE) × 反射率                         // 混响路径自己吸掉的高频
-	 *   sendCutoff = clamp(base × mat, SEND_CUTOFF_MIN, 1)                           // 硬下限 0.20
-	 * </pre>
-	 *
-	 * @param occ          遮挡值（含放宽）
-	 * @param wantWeight   该延迟带"从别处绕过来"的权重 {@code w_i}（0..1）
-	 * @param reflectivity 该延迟带那一层的平均反射率（≤0 时调用方传平均反射率做兜底）
-	 */
-	public static float sendCutoffFor(double occ, float wantWeight, float reflectivity) {
-		float occSend = SEND_CUTOFF_MIN + (1.0f - SEND_CUTOFF_MIN) * (float) Math.exp(-occ * SEND_OCC_K);
-		float w = clamp01(wantWeight);
-		float base = occSend * (1.0f - w) + w;
-		float mat = HF_REFL_BASE + (1.0f - HF_REFL_BASE) * clamp01(reflectivity);
-		return Math.max(SEND_CUTOFF_MIN, Math.min(1.0f, base * mat));
-	}
-
 	// ---------------------------------------------------------------- 采集层（射线）
 
 	/**
@@ -559,14 +397,11 @@ public final class Acoustics {
 	 *
 	 * <p>要点：
 	 * <ul>
-	 *   <li>遮挡值来自 {@link BlockAcoustics}（自己按方块声音组 + 完整方块 + 硬度 + 液体推导），
-	 *       但<b>是否累加</b>由"射线有没有真的命中这一格的碰撞形状"决定
-	 *       （{@link BlockAcoustics#blocksRay}）—— 关着的门算挡、开着的门算 0、楼梯的缝不算。</li>
-	 *   <li>非严格模式：再把两个端点各偏移 ±1 格的 8 个对角点算一遍 —— <b>不取最小值</b>
-	 *       （那样一条缝就把遮挡抹平成 0），而是数"<b>有几条通透通路</b>"。
-	 *       <b>0.12.7</b>：{@code 放宽 = 上限 × 超出比例}，且<b>只有 ≥ {@link #DEFAULT_OPEN_PATHS}
-	 *       条（默认 6/8）通透时才放宽，最多削掉 {@link #DEFAULT_RELAX_MAX}（40%）</b>；
-	 *       达不到门槛一分不放宽（旧版 3/8 就砍 85%，门关着和开着听不出区别）。</li>
+	 *   <li>遮挡值来自 {@link BlockAcoustics}（自己按方块声音组 + 完整方块 + 硬度 + 液体推导）。</li>
+	 *   <li>非严格模式：再把两个端点各偏移 ±1 格的 8 个对角点算一遍 —— 但
+	 *       <b>不再"取最小值"</b>（那样一条缝就把遮挡抹平成 0，效果全没）。
+	 *       现在数"<b>有几条通透通路</b>"：{@code 放宽 = MAX_RELAX × min(1, 通路数 / 需要通路数)}，
+	 *       不足量就只按比例放宽，且最多降到原值的 15%。</li>
 	 *   <li>{@code cutoff = exp(-遮挡累积 x k)}、{@code gain = cutoff^0.2}；k 来自配置（默认 4.5）。
 	 *       开阔度修正 {@code max(sqrt(shared)*0.2, cutoff)} 加了门槛：遮挡 ≥ 0.6 时不允许抬截止。</li>
 	 * </ul>
@@ -605,11 +440,10 @@ public final class Acoustics {
 
 		double occMain = occlusionAt(world, center, ear, jukebox);
 		int openPaths = 0;
-		double relax = 0.0;
 		double occ = occMain;
 		if (!strictOcclusion() && occMain > 0.0) {
 			// 只要主射线被挡就试 8 个对角偏移；主射线本来就通透时遮挡必然是 0，不用白算。
-			// 这里不取最小值，而是"数通路"——见下方门槛（openPathsRequired）与放宽上限（relaxCap）。
+			// 注意：这里不再取最小值，而是"数通路"——见方法注释与 MAX_RELAX。
 			for (int sx = -1; sx <= 1; sx += 2) {
 				for (int sy = -1; sy <= 1; sy += 2) {
 					for (int sz = -1; sz <= 1; sz += 2) {
@@ -622,37 +456,39 @@ public final class Acoustics {
 				}
 			}
 			int need = openPathsRequired();
-			// 0.12.7 门槛：**达不到"大多数通路都通透"就一分不放宽**（旧版 3/8 就砍掉 85%）。
-			if (openPaths >= need) {
-				// 刚过门槛给最小的一档，全部 8 条通透才给到配置的上限（默认 40%）。
-				double excess = clampD((openPaths - need + 1) / (double) (OPEN_PATH_TOTAL - need + 1), 0.0, 1.0);
-				relax = relaxCap() * excess;
-			}
+			double relax = MAX_RELAX * Math.min(1.0, openPaths / (double) need);
 			occ = occMain * (1.0 - relax);
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
-		st.lastRelax = (float) relax;
 
 		// 强度旋钮同时缩放"遮挡强度"：k_eff = k(配置) x 强度
 		// 0 = 关闭（上面已提前返回）、1.0 = 默认、2.0 = 非常激进
 		float k = absorption() * level;
 		st.lastK = k;
+		float cutoffNoAir = (float) Math.exp(-occ * k);
 		st.occlusionAcc = (float) occ;
 
 		// ---- 混响射线（M4/M5）：从唱片机按黄金角球面均匀发射，每条最多 4 次反弹 ----
-		ReverbResult rr = traceReverb(world, center, ear, jukebox, occ);
+		ReverbResult rr = traceReverb(world, center, ear, jukebox, occ, k);
 		float avgShared = rr.sharedAirspaceWeight;
 		st.openness = occ <= 0.0 ? 1.0f : avgShared;
 
-		// ---- 直通：截止/增益/开阔度修正/空气吸收/0.12.9 可听下限，全部在 directParams 里 ----
-		// （0.12.9 把这一段抽成纯函数，让 offline 自检能跑生产同一条实现）
-		DirectParams dp = directParams(occ, k, avgShared, dist);
-		float cutoff = dp.cutoff();
-		float gain = dp.gain();
+		// 开阔度修正：同一片开阔空间里，声音能从别处绕过来 → 直通不该被压得太死
+		// （对应 SPR 的 directCutoff = max(sqrt(averageSharedAirspace)*0.2, directCutoff)，
+		//  但加了门槛：遮挡达到 OPENNESS_GATE_OCC 之后，开阔度一律不许抬截止 ——
+		//  否则"隔一层石头墙"会被开阔度顶回 0.19 左右，听感只剩"稍微暗一点"。）
+		float gate = (float) clampD(occ / OPENNESS_GATE_OCC, 0.0, 1.0);
+		float opennessFloor = (float) (OPENNESS_FLOOR_COEF * Math.sqrt(Math.max(0.0f, avgShared)))
+				* (1.0f - gate);
+		float cutoffWithShared = Math.max(opennessFloor, cutoffNoAir);
+		float gain = (float) Math.pow(cutoffWithShared, DIRECT_GAIN_EXP);
+		// 空气吸收：按距离衰减高频（"远处高频先没"）。只压高频，不压总增益
+		// —— 总增益本来就有 OpenAL 的距离衰减在管。
+		float air = (float) Math.pow(0.9, Math.max(0.0, (dist - AIR_START) / 3.0));
+		float cutoff = Math.max(MIN_DIRECT_CUTOFF, cutoffWithShared * air);
 
 		// ---- M6 水下：直通再乘 0.1，混响发送也一起变闷 ----
-		// 注意：水下**故意**低于上面那两个可听下限 —— 它是另一个开关，语义是"闷到几乎听不清"。
 		boolean underwater = false;
 		try {
 			underwater = self.isSubmergedInWater();
@@ -689,8 +525,7 @@ public final class Acoustics {
 		fillSends(st, rr, soundLevel());
 		if (underwater) {
 			for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
-				// 0.12.9：水下是"更闷"的有意档位，但也**不许掐成静音** —— 有第二道下限。
-				st.tSendCutoff[i] = Math.max(SEND_CUTOFF_MIN_UNDERWATER, clamp01(st.tSendCutoff[i] * 0.4f));
+				st.tSendCutoff[i] = clamp01(st.tSendCutoff[i] * 0.4f);
 			}
 		}
 		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
@@ -766,24 +601,18 @@ public final class Acoustics {
 		to.airAbsorptionGainHF = from.airAbsorptionGainHF;
 	}
 
-	/**
-	 * 混响参数是否"变到值得重写"。
-	 * <p>0.12.7：阈值整体加大（增益 0.02 → 0.04、衰减时间 0.05 → 0.15、
-	 * 晚混响延迟 0.005 → 0.01）—— 0.12.6 的阈值下基本上每轮评估都在重写 EAXReverb 的十个参数，
-	 * 而每次写入都可能带出一点小爆音。加大后只在"真的换了个环境"时才写。
-	 */
 	private static boolean reverbDiffers(EfxEngine.Reverb a, EfxEngine.Reverb b) {
-		final float e = 0.04f;
+		final float e = 0.02f;
 		return Math.abs(a.gain - b.gain) > e
 				|| Math.abs(a.gainHF - b.gainHF) > e
-				|| Math.abs(a.decayTime - b.decayTime) > 0.15f
+				|| Math.abs(a.decayTime - b.decayTime) > 0.05f
 				|| Math.abs(a.decayHFRatio - b.decayHFRatio) > e
 				|| Math.abs(a.reflectionsGain - b.reflectionsGain) > e
 				|| Math.abs(a.lateReverbGain - b.lateReverbGain) > e
-				|| Math.abs(a.lateReverbDelay - b.lateReverbDelay) > 0.01f
+				|| Math.abs(a.lateReverbDelay - b.lateReverbDelay) > 0.005f
 				|| Math.abs(a.density - b.density) > e
 				|| Math.abs(a.diffusion - b.diffusion) > e
-				|| Math.abs(a.airAbsorptionGainHF - b.airAbsorptionGainHF) > 0.01f;
+				|| Math.abs(a.airAbsorptionGainHF - b.airAbsorptionGainHF) > 0.005f;
 	}
 
 	/** 把 EAXReverb 参数按需灌进效果器（只有变化超过阈值才写，避免每 tick 重设造成杂音/开销）。 */
@@ -838,13 +667,8 @@ public final class Acoustics {
 				new EfxEngine.Reverb(), new EfxEngine.Reverb()};
 	}
 
-	/**
-	 * 混响射线：从唱片机按黄金角球面均匀发射 {@code physicsRays} 条，每条最多 {@link #REVERB_BOUNCES} 次反弹。
-	 *
-	 * <p><b>0.12.9</b>：不再需要 {@code k}（旧代码用它算 {@code exp(-occ*k)} 当发送低通，
-	 * 就是 Bug A 的来源 —— 见 {@link #sendCutoffFor}）。
-	 */
-	private static ReverbResult traceReverb(World world, Vec3d center, Vec3d ear, BlockPos jukebox, double occ) {
+	private static ReverbResult traceReverb(World world, Vec3d center, Vec3d ear, BlockPos jukebox, double occ,
+			float k) {
 		ReverbResult out = new ReverbResult();
 		int numRays = rays();
 		float rcpTotalRays = 1.0f / (numRays * (float) REVERB_BOUNCES);
@@ -937,19 +761,11 @@ public final class Acoustics {
 		float w3 = clamp(sharedAirspace / 10.0f, 0.0f, 1.0f);
 		out.sharedAirspaceWeight = (w0 + w1 + w2 + w3) * 0.25f;
 
-		// ---- 0.12.9 Bug A：混响发送的高频 ----
-		// 旧公式（0.12.6~0.12.8）：occCut = exp(-occ*k)、sendCutoff[i] = occCut*(1-w_i)+w_i。
-		// k=4.5、occ=2.1 时 occCut = exp(-9.45) = 7.9e-5，w=0 时 4 路发送的低通全是 7.9e-5
-		// —— 现场下发值 0.001，混响被自己掐掉（"没有音效，整体全部效果都没了"）。
-		// 现在：只按"混响路径自己吸掉多少高频"（逐层反射率）+ 温和的遮挡项 + 硬下限 0.20。
-		// 纯函数实现见 Acoustics#sendCutoffFor（离线自检跑同一条）。
-		float[] bandWeights = {w0, w1, w2, w3};
-		for (int i = 0; i < bandWeights.length; i++) {
-			// 这一层一条射线都没命中（例如全跑进了开阔天空）时，bandRefl[i] 是 0：
-			// 那是"没测到"，不是"全吸声"，用平均反射率兜底，避免凭空多压一次高频。
-			float refl = out.bandRefl[i] > 0.0f ? out.bandRefl[i] : (float) out.avgReflectivity;
-			out.sendCutoff[i] = sendCutoffFor(occ, bandWeights[i], refl);
-		}
+		float occCut = (float) Math.exp(-occ * k);
+		out.sendCutoff[0] = occCut * (1.0f - w0) + w0;
+		out.sendCutoff[1] = occCut * (1.0f - w1) + w1;
+		out.sendCutoff[2] = occCut * (1.0f - w2) + w2;
+		out.sendCutoff[3] = occCut * (1.0f - w3) + w3;
 
 		// 距离衰减：离得越远，混响越少（否则整个地图都在响同一份余响）
 		double dist = ear.distanceTo(center);
@@ -1008,25 +824,11 @@ public final class Acoustics {
 		return Math.max(ABSORPTION_MIN, Math.min(ABSORPTION_MAX, v));
 	}
 
-	/**
-	 * 需要几条通透通路才算"真的漏音"（配置 {@code physicsOcclusionPaths}）。
-	 * <p>0.12.7：默认从 3 提到 <b>6</b>（共 8 条偏移射线）—— 旧值 3/8 会在一格厚的墙、
-	 * 一扇门的旁边就触发"砍掉 85% 遮挡"，正是"门关着和开着一样"的根因之一。
-	 */
+	/** 需要几条通透通路才算"真的漏音"（配置 {@code physicsOcclusionPaths}，默认 3）。 */
 	private static int openPathsRequired() {
 		CloudDiscConfig cfg = CloudDiscClient.config();
-		int v = cfg == null ? DEFAULT_OPEN_PATHS : cfg.physicsOcclusionPaths;
+		int v = cfg == null ? DEFAULT_OPEN_PATHS : Math.max(DEFAULT_OPEN_PATHS, cfg.physicsOcclusionPaths);
 		return Math.max(OPEN_PATHS_MIN, Math.min(OPEN_PATHS_MAX, v));
-	}
-
-	/** 放宽幅度上限（配置 {@code physicsOcclusionRelax}，默认 0.40 = 最多削掉 40% 的遮挡）。 */
-	private static double relaxCap() {
-		CloudDiscConfig cfg = CloudDiscClient.config();
-		double v = cfg == null ? DEFAULT_RELAX_MAX : cfg.physicsOcclusionRelax;
-		if (Double.isNaN(v)) {
-			return DEFAULT_RELAX_MAX;
-		}
-		return Math.max(RELAX_MAX_MIN, Math.min(RELAX_MAX_MAX, v));
 	}
 
 	/** 调试日志总开关（{@code physicsSoundDebug}）。 */
@@ -1117,40 +919,72 @@ public final class Acoustics {
 				String.join(" ", BlockAcoustics.sampleTable(world)));
 	}
 
-	/**
-	 * 沿 from → to 逐格累加材质遮挡值。
-	 *
-	 * <p><b>0.12.8</b>：累加逻辑搬到 {@link OcclusionWalk#accumulate}（可离线单测），
-	 * 单格判定用 {@link BlockAcoustics#occlusionOnRay}（几何判定 = {@link RayShape#hits}）。
-	 * 顺带把"走了几格 / 实心几格 / 判定挡几格"记进 {@link State}，好让现场日志能自证。
-	 */
+	/** 沿 from → to 逐格累加材质遮挡值。 */
 	private static double occlusionAt(World world, Vec3d from, Vec3d to, BlockPos skip) {
-		OcclusionWalk.Result r = OcclusionWalk.accumulate(from, to, MAX_OCC_STEPS, MAX_OCC, (p, f, t) -> {
+		final double[] acc = {0.0};
+		RayWalk.walk(from.x, from.y, from.z, to.x, to.y, to.z, MAX_OCC_STEPS, (x, y, z, t, nx, ny, nz) -> {
+			BlockPos p = new BlockPos(x, y, z);
 			if (skip != null && p.equals(skip)) {
-				return 0.0; // 唱片机自己那一格不算（射线本来也从它内部出发）
+				return true;
 			}
 			BlockState bs;
 			try {
 				bs = world.getBlockState(p);
 			} catch (Throwable e) {
-				return 0.0;
+				return false;
 			}
-			double v = BlockAcoustics.occlusionOnRay(bs, world, p, f, t);
-			if (v > 0.0) {
-				noteProbe(bs, world, p); // 诊断：这次真的算它了（① 材质探针）
+			if (bs.isAir()) {
+				return true;
 			}
-			return v;
+			boolean fluid = false;
+			try {
+				fluid = !bs.getFluidState().isEmpty();
+			} catch (Throwable ignored) {
+				// 取不到就当不是流体
+			}
+			if (!fluid) {
+				try {
+					if (!hitsShape(bs.getCollisionShape(world, p), from, to, p)) {
+						return true; // 草/火把/藤蔓这类没有碰撞体积的东西不算遮挡
+					}
+				} catch (Throwable e) {
+					return true;
+				}
+			}
+			noteProbe(bs, world, p); // 诊断：这次真的算它了（① 材质探针）
+			acc[0] += BlockAcoustics.occlusionOf(bs, world, p);
+			return acc[0] < MAX_OCC;
 		});
-		lastWalkWalked = r.walkedCells;
-		lastWalkSolid = r.solidCells;
-		lastWalkHit = r.hitCells;
-		return r.occlusion;
+		return Math.min(acc[0], MAX_OCC);
 	}
 
-	// 0.12.8 诊断：最近一次"主射线"的走格统计（供 physicsSoundDebug 日志自证）
-	private static volatile int lastWalkWalked;
-	private static volatile int lastWalkSolid;
-	private static volatile int lastWalkHit;
+	/**
+	 * 射线 from→to 是否真的撞上这一格的碰撞形状。
+	 *
+	 * <p><b>为什么必须求交</b>：开关门/楼梯/玻璃板/栅栏这些"非完整方块"的碰撞形状会变，
+	 * 只判"有没有碰撞体积"会把**开着的门**也算成挡（实测就是这个问题）。
+	 *
+	 * <p>满格方块（石头/木板/关着的门这类单盒且填满 0..1）直接判挡：
+	 * 射线进这一格必然撞上，同时也避开"入射点正好落在边界上"的浮点误差。
+	 * 其余情况用 {@link VoxelShape#raycast} 真正求交（它需要**世界坐标**，内部会 box.offset(pos)）；
+	 * 若起点/终点已经落在实体内部（raycast 对这种情形可能返回 null），用包围盒补判。
+	 */
+	private static boolean hitsShape(VoxelShape shape, Vec3d from, Vec3d to, BlockPos pos) {
+		try {
+			Box bb = shape.getBoundingBox();
+			boolean fullCube = bb.minX <= 1.0e-3 && bb.minY <= 1.0e-3 && bb.minZ <= 1.0e-3
+					&& bb.maxX >= 1.0 - 1.0e-3 && bb.maxY >= 1.0 - 1.0e-3 && bb.maxZ >= 1.0 - 1.0e-3;
+			if (fullCube) {
+				return true;
+			}
+			if (shape.raycast(from, to, pos) != null) {
+				return true;
+			}
+			return bb.contains(from) || bb.contains(to);
+		} catch (Throwable t) {
+			return true; // 保守：算挡住
+		}
+	}
 
 	private static boolean strictOcclusion() {
 		CloudDiscConfig cfg = CloudDiscClient.config();
@@ -1203,11 +1037,8 @@ public final class Acoustics {
 	/**
 	 * M6 方向性：把平滑后的声源位置写回 OpenAL（纯 AL 调用，与 EFX 是否可用无关）。
 	 * <p>只在"真的偏移了"的时候写，避免每 tick 覆盖原版设置。
-	 * <p><b>0.12.7</b>：位置同样<b>限频</b>（{@link #WRITE_INTERVAL_TICKS} 刻一次）——
-	 * 位置本来就已经按时间平滑（时间常数 {@link #SMOOTH_SECONDS}），再降一点写入频率
-	 * 只减少"每 tick 一次 AL 调用"带来的抖动，听感不变。
 	 */
-	private static void applyPosition(int sourceId, State st, double centerX, double centerY, double centerZ, long nowTick) {
+	private static void applyPosition(int sourceId, State st, double centerX, double centerY, double centerZ) {
 		if (!st.posSeeded) {
 			return;
 		}
@@ -1217,65 +1048,10 @@ public final class Acoustics {
 		if (dx * dx + dy * dy + dz * dz < 0.01) {
 			return; // 没偏移：保持原版给的位置
 		}
-		if (nowTick - st.lastPosWriteTick < WRITE_INTERVAL_TICKS) {
-			return; // 限频（0.12.7）
-		}
-		st.lastPosWriteTick = nowTick;
 		try {
 			AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) st.posX, (float) st.posY, (float) st.posZ);
 		} catch (Throwable t) {
 			// 位置偏移失败不影响播放
-		}
-	}
-
-	/**
-	 * 关闭总开关后的"退场"：把参数按时间平滑到直通（截止/增益 → 1，发送 → 0），
-	 * 推完（{@link #DISENGAGE_TICKS} 刻）才真正摘掉 EFX。
-	 *
-	 * <p>只有"播放途中被关掉"才会走到这里；冷启动时开关就是关的 → {@link #disengageSource} 为 0，直接返回。
-	 * <p>声源已经回收（反查返回 0）时<b>绝不</b>往旧 id 上写 —— 那可能写到别人的声源上。
-	 */
-	private static void tickDisengage(SoundInstance instance, BlockPos jukebox, long nowTick) {
-		if (disengageSource == 0) {
-			return;
-		}
-		int cur = resolveSourceId(instance);
-		if (cur != 0) {
-			disengageSource = cur;
-		}
-		try {
-			if (cur != 0) {
-				State st = stateFor(cur);
-				st.tDirectCutoff = 1.0f;
-				st.tDirectGain = 1.0f;
-				for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
-					st.tSendGain[i] = 0.0f;
-					st.tSendCutoff[i] = 1.0f;
-				}
-				smooth(st, nowTick);
-				if (directionEnabled() && jukebox != null) {
-					Vec3d c = centerOf(jukebox);
-					st.tPosX = c.x;
-					st.tPosY = c.y;
-					st.tPosZ = c.z;
-					applyPosition(cur, st, c.x, c.y, c.z, nowTick);
-				}
-				if (EfxEngine.isAvailable()) {
-					EfxEngine.applyToSource(cur, st.directCutoff, st.directGain, st.sendGain, st.sendCutoff, nowTick);
-				}
-			}
-		} catch (Throwable ignored) {
-			// 退场平滑出错不影响播放；下面照样按时间摘掉
-		}
-		if (nowTick >= disengageEndTick) {
-			if (cur != 0) {
-				EfxEngine.bypassSource(cur);
-				synchronized (STATES) {
-					STATES.remove(cur);
-				}
-				CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效: 参数已平滑到直通 → 摘掉 EFX / 恢复干净直通");
-			}
-			disengageSource = 0;
 		}
 	}
 
@@ -1292,38 +1068,15 @@ public final class Acoustics {
 		st.lastLogTick = nowTick;
 		Vec3d ear = earOf(self);
 		double dist = ear.distanceTo(centerOf(jukebox));
-		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: ver={} source={} EFX={} 遮挡累积={} 主射线遮挡={} 主射线走格={} 实心格={} 判定挡={} 通透通路={}/{} 放宽={} 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
-						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格 能量预算(直通倍率)={} 有效发送能量={}",
-				version(),
+		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: source={} EFX={} 遮挡累积={} 主射线遮挡={} 通透通路={}/8 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
+						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格",
 				sourceId,
 				EfxEngine.isAvailable() ? "可用(" + EfxEngine.bands() + "段)" : "不可用→DSP",
-				fmt(st.occlusionAcc), fmt(st.lastOccMain), lastWalkWalked, lastWalkSolid, lastWalkHit,
-				st.lastOpenPaths, OPEN_PATH_TOTAL, fmt(st.lastRelax),
-				fmt(st.lastK),
+				fmt(st.occlusionAcc), fmt(st.lastOccMain), st.lastOpenPaths, fmt(st.lastK),
 				fmt(st.directCutoff), fmt(st.directGain), fmt(st.openness),
 				fmt1(dist), st.underwater, fmt1(offsetOf(st, jukebox)), fmt3(st.evalNanos / 1.0e6),
-				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath),
-				// 0.12.9：这两个数来自 EfxEngine.applyToSource ——
-				// 直通增益 × 能量预算(直通倍率) 才是真正写进 OpenAL 的值。
-				fmt(EfxEngine.lastBudget()), fmt(EfxEngine.lastSendEnergy()));
+				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath));
 	}
-
-	/** Mod 版本号（日志里带上：排障时一眼看出用户到底跑的哪一版）。 */
-	public static String version() {
-		String v = cachedVersion;
-		if (v == null) {
-			try {
-				v = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer("clouddisc")
-						.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("?");
-			} catch (Throwable t) {
-				v = "?";
-			}
-			cachedVersion = v;
-		}
-		return v;
-	}
-
-	private static volatile String cachedVersion;
 
 	private static double offsetOf(State st, BlockPos jukebox) {
 		if (!st.posSeeded) {
@@ -1377,26 +1130,18 @@ public final class Acoustics {
 	private static int[] apIdx;
 	private static float preparedRate = 0.0f;
 
-	/**
-	 * 对一段单声道、归一化样本做处理：直通低通 + 增益 + 混响。
-	 *
-	 * <p><b>EFX 可用时一个样本都不碰</b>（第一行就返回；EFX 负责效果，这里再滤一次会双重滤波）。
-	 *
-	 * <p><b>0.12.7 修的一处爆音来源</b>：以前入口是
-	 * {@code if (EfxEngine.isAvailable() || !isActive() || ...)}，并且一旦"不活跃"就把
-	 * {@code lpState}（一阶低通的状态）和 {@code smoothCutoffHz} 清掉。问题是
-	 * {@code isActive()} 在"参数回到全通"（例如走进开阔地）时会变假、之后又变真 ——
-	 * 每次重新接通，滤波器状态都从 0 开始，而输入信号不是 0 → <b>一个阶跃</b>，听起来就是"bip"。
-	 * 现在改成：<b>只要在走 DSP 兜底，链路就一直接通</b>（参数自己会平滑到"全通"，
-	 * 全通时对样本几乎无影响），再也不清状态。
-	 */
+	/** 对一段单声道、归一化样本做处理：直通低通 + 增益 + 混响。EFX 可用时一个样本都不碰。 */
 	public static void filterMono(float[] buf, int offset, int frames, float sampleRate) {
-		if (EfxEngine.isAvailable() || sampleRate <= 0.0f) {
-			return; // EFX 路径：完全不碰样本
+		if (EfxEngine.isAvailable() || !isActive() || sampleRate <= 0.0f) {
+			if (smoothCutoffHz != -1.0f) {
+				smoothCutoffHz = -1.0f;
+				lpState = 0.0f;
+			}
+			return;
 		}
 		State st = dspState;
 		if (st == null) {
-			return; // 没有正在评估的声源（没有我们自己的音频在放）：同样不碰
+			return;
 		}
 		prepareReverb(sampleRate);
 
@@ -1405,7 +1150,6 @@ public final class Acoustics {
 		// 平滑按时间收敛（1 - exp(-块时长/tau)），不按块数。
 		float k = (float) (1.0 - Math.exp(-(double) frames / (SMOOTH_SECONDS * sampleRate)));
 		if (smoothCutoffHz < 0.0f) {
-			// 第一次：直接对齐目标（冷启动，"全通"起步不存在记忆问题）
 			smoothCutoffHz = targetHz;
 		} else {
 			smoothCutoffHz += (targetHz - smoothCutoffHz) * k;

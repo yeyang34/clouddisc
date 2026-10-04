@@ -45,9 +45,9 @@ public final class CloudDiscClient implements ClientModInitializer {
 		sync.init();
 		// 物理声效的总开关：把配置里的值同步给声学模块（同时也用于 DSP 兜底路径的判断）
 		dev.clouddisc.audio.Acoustics.setEnabled(config.physicsSound);
-		LOGGER.info("[CloudDisc] 物理声效: 总开关={} 强度={} 隔墙闷度k={} 漏音通路数={}/8 放宽上限={} 射线数={} 严格遮挡={} 方向性={} 调试日志={}",
+		LOGGER.info("[CloudDisc] 物理声效: 总开关={} 强度={} 隔墙闷度k={} 漏音通路数={} 射线数={} 严格遮挡={} 方向性={} 调试日志={}",
 				config.physicsSound, config.physicsSoundLevel, config.physicsAbsorption,
-				config.physicsOcclusionPaths, config.physicsOcclusionRelax, config.physicsRays,
+				config.physicsOcclusionPaths, config.physicsRays,
 				config.physicsStrictOcclusion, config.physicsSoundDirection, config.physicsSoundDebug);
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -79,7 +79,6 @@ public final class CloudDiscClient implements ClientModInitializer {
 				})));
 
 		LOGGER.info("[CloudDisc] ===== 诊断信息（遇到问题请把这一段连同后续报错一起发给我）=====");
-		LOGGER.info("[CloudDisc] 版本     : {}", dev.clouddisc.audio.Acoustics.version());
 		LOGGER.info("[CloudDisc] 游戏目录 : {}", FabricLoader.getInstance().getGameDir());
 		LOGGER.info("[CloudDisc] 音乐目录 : {}  ← 把 .ogg / .wav 放在这里", config.resolveLocalMusicDir());
 		LOGGER.info("[CloudDisc] 缓存目录 : {}", config.resolveCacheDir());

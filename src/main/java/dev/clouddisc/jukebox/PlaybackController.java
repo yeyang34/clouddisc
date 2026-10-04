@@ -429,25 +429,12 @@ public final class PlaybackController {
 	private static void logConsumption(JukeboxSession s, AudioPipeline pipe, String when) {
 		long played = pipe.playedMs();
 		long backlog = pipe.ring().available() / AudioPipeline.BYTES_PER_MS;
-		// 0.12.7：打开调试日志时，把"环形缓冲还剩多少空间 / 欠载过几次"也带上 ——
-		// 这是判断"刺声是不是解码供不上"最直接的一行（欠载次数一直涨 = 供不上）。
-		String extra = "";
-		try {
-			CloudDiscConfig cfg = CloudDiscClient.config();
-			if (cfg != null && cfg.physicsSoundDebug) {
-				long freeMs = pipe.ring().capacity() / AudioPipeline.BYTES_PER_MS - backlog;
-				extra = "，缓冲剩余空间 " + freeMs + "ms，欠载 " + pipe.ring().starveCount() + " 次";
-			}
-		} catch (Throwable ignored) {
-			// 诊断信息拿不到也无所谓
-		}
 		if (played <= 0L) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 起播 {} 后：声音引擎一点都没取数据（playedMs=0，缓冲积压 {}ms）"
 					+ " → 这条声音没有被真正播放。请先检查『唱片机/音符盒』音量是不是 0，以及是否被别的东西立刻停掉了",
 					when, backlog);
 		} else {
-			CloudDiscClient.LOGGER.info("[CloudDisc] 起播 {} 后：声音引擎已消费 {}ms，缓冲积压 {}ms{}（正常）",
-					when, played, backlog, extra);
+			CloudDiscClient.LOGGER.info("[CloudDisc] 起播 {} 后：声音引擎已消费 {}ms，缓冲积压 {}ms（正常）", when, played, backlog);
 		}
 	}
 
