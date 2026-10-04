@@ -6,6 +6,184 @@
 
 ---
 
+## 0.12.7
+
+**修「门关着和门开着遮挡几乎一样」（真 bug）+ 顺手加固刺声**
+
+用户实测反馈两条：
+1. 「门关上时候和开着时候的遮挡一样几乎没有」（**真 bug，本轮主任务**）
+2. 「会有像打响指一样的爆破声很短促像是 bip 一下」，随后补充「像是那种音频接触不良似的那种刺声」，
+   最后又说「不对，像是耳机问题」→ 按"**顺手加固、不重构**"处理（见文末）。
+
+### Bug 1 根因（三条，全部能在代码里指到行）
+
+1. **漏音放宽规则作用在"两端各偏移 ±1 格的 8 条射线"上，且一过门槛就砍 85%**
+   （0.12.6 `Acoustics.evaluate`）：
+
+   ```java
+   double relax = MAX_RELAX * Math.min(1.0, openPaths / (double) need); // 0.85 * min(1, 通路/3)
+   occ = occMain * (1.0 - relax);
+   ```
+
+   - 公式形状是 **`occ = occMain × (1 - 放宽)`**（不是 `× 放宽`）；
+   - 乘的位置在 `occlusionAt()` **返回之后**（即 `MAX_OCC = 3.0` 的 clamp 之后）、
+     `exp(-occ*k)` **之前**；
+   - `physicsOcclusionPaths` 默认 **3** ⇒ **8 条偏移射线里只要有 3 条通透，主射线算出来的遮挡只剩 15%**。
+   - 关键：偏移射线是"整条线平移"，擦着墙边、过门口、过墙角都会变成"通透"，
+     所以一扇**关着的门 / 一格厚的墙**旁边很容易凑够 3 条 → 门关着时 0.22 被削到 0.033 →
+     `exp(-0.033×4.5) = 0.86`（约 **-1.3 dB** 高频）= 听感上"跟没挂一样"。
+2. **关着的门本身也算得太小**（`BlockAcoustics`）：木门 `isOpaque()` 为 false（×0.8）、
+   `isOpaqueFullCube()` 也为 false（再 ×0.5）⇒ 0.55 × 0.8 × 0.5 = **0.22** →
+   高频截止 0.372（**-8.6 dB**），只是"稍微暗一点"。
+3. **几何判定用的是"方块类型"，不是"射线实际有没有被挡住"**：
+   `occlusionAt` 只判 `getCollisionShape().isEmpty()`（这一格有没有碰撞体积），
+   再用 `isOpaqueFullCube` 打对折来"补偿缝隙"。两个后果：
+   - 关着的门（有碰撞体积、但被判成"非完整方块"）被当成"一条缝"；
+   - 楼梯/栅栏这种"有碰撞体积但射线能从缝里过"的格子被整格当成实心白算一笔。
+
+> 关于用户猜的「DDA 是不是把门的碰撞体积当成'可通过'」：**不是**。
+> `RayWalk` 只看碰撞形状是否为空，关着的门形状非空 ⇒ 门**是**被 DDA 记进累加的。
+> 真正的问题在"记进去之后又被两条打折规则砍掉"，以及"放宽规则又砍 85%"。
+
+### 改了什么（旧 → 新）
+
+| 项 | 旧（0.12.6） | 新（0.12.7） | 位置 |
+|---|---|---|---|
+| 放宽公式 | `0.85 × min(1, 通路/3)`（3/8 就砍 85%） | **门槛 + 上限**：`通路 ≥ 需要数` 才放宽；`放宽 = 上限 × (通路-需要数+1)/(8-需要数+1)`，最多 `0.40`；**达不到门槛一分不放宽** | `Acoustics.evaluate` |
+| 需要通路数 | 3（配置 1~9） | **6**（配置 1~8，默认 6/8） | `DEFAULT_OPEN_PATHS` / `physicsOcclusionPaths` |
+| 放宽上限 | 0.85（写死） | **0.40**（新配置 `physicsOcclusionRelax`，0~0.60） | `DEFAULT_RELAX_MAX` |
+| 是否累加遮挡 | 这一格有碰撞体积就算 | **射线与碰撞形状精确求交**（`VoxelShape.raycast`）才累加 | `BlockAcoustics.blocksRay` + `Acoustics.occlusionAt` |
+| 门/非完整方块 | 材质值 × 0.8（非不透明）× 0.5（非完整方块几何） | **删掉 × 0.5 几何打折**（几何已由求交精确判定） | `BlockAcoustics.occlusionOf` |
+| 玻璃基础遮挡 | 0.50（×0.8×0.5 = 实际 0.20） | **0.25**（×0.8 = 实际 **0.20**，听感与 0.12.6 完全一致） | `BlockAcoustics` GLASS 档 |
+| 配置版本 | 5 | **6**（`physicsOcclusionPaths ≤ 3` 时迁到 6，尊重用户自己调过的更大值） | `CloudDiscConfig` |
+
+**数值结果**（`tools/AcousticsMath.java` 实跑，见下方原始输出）：
+门关着 **0.44 → 截止 0.138（-17.2 dB）**、门开着 **0 → 1.000（0 dB）**、
+一层石头 0.011（-39.1 dB）、一层玻璃 0.4066（-7.8 dB）、一层木板 0.0842（-21.5 dB）。
+**门关 vs 门开的高频差距：8.6 dB → 17.2 dB**；玻璃/木板/石头三档与 0.12.6 一模一样。
+
+### ① 桌面复算（真跑了，不是推论）
+
+```
+$ java tools/AcousticsMath.java
+openness shared airspace (representative avgShared) = 0.90
+openness floor at shared=0.90 -> 0.1897 (0.12.5 used it unconditionally)
+
+== 0.12.7 scene table: occlusion accumulated by the ray (no relax applied) ==
+scene                  occ(0.12.7) occ(0.12.6)     GAINHF    HF dB     GAIN
+door CLOSED (oak_door)       0.44       0.22     0.1381    -17.2    0.673
+door OPEN   (oak_door)       0.00       0.00     1.0000      0.0    1.000
+1x planks   (oak)            0.55       0.55     0.0842    -21.5    0.610
+1x glass    (block)          0.20       0.20     0.4066     -7.8    0.835
+1x stone    (block)          1.00       1.00     0.0111    -39.1    0.407
+2x stone    (stacked)        2.00       2.00     0.0050    -46.0    0.165
+
+  door CLOSED vs OPEN = the audible gap the user asked for:
+    closed GAINHF 0.1381 (-17.2 dB) / OPEN 1.0000 (0.0 dB) -> 17.2 dB apart in HF
+    old 0.12.6 closed GAINHF 0.3716 (-8.6 dB) -> only 8.6 dB apart ("almost the same")
+
+== relax (leak) rule: old 0.12.6 vs new 0.12.7 ==
+open/8       relax(old)   relax(new) occ@door0.44  GAINHF@door
+0/8                0.00         0.00 0.44 (old 0.44)       0.1381
+1/8                0.28         0.00 0.44 (old 0.32)       0.1381
+2/8                0.57         0.00 0.44 (old 0.19)       0.1381
+3/8                0.85         0.00 0.44 (old 0.07)       0.1381
+4/8                0.85         0.00 0.44 (old 0.07)       0.1381
+5/8                0.85         0.00 0.44 (old 0.07)       0.1381
+6/8                0.85         0.13 0.38 (old 0.07)       0.1798
+7/8                0.85         0.27 0.32 (old 0.07)       0.2341
+8/8                0.85         0.40 0.26 (old 0.07)       0.3048
+
+  the reported bug in one line: a 1-thick wall / a closed door easily gets 3-4 clear
+  offset rays, so the OLD rule wiped ~85% of the occlusion while the door was CLOSED:
+    open=3/8 : 0.12.6 GAINHF 0.7430 (-2.6 dB)  ->  0.12.7 GAINHF 0.1381 (-17.2 dB)
+    open=4/8 : 0.12.6 GAINHF 0.7430 (-2.6 dB)  ->  0.12.7 GAINHF 0.1381 (-17.2 dB)
+    open=5/8 : 0.12.6 GAINHF 0.7430 (-2.6 dB)  ->  0.12.7 GAINHF 0.1381 (-17.2 dB)
+
+== acceptance table: door closed / door open / 1 stone / 1 glass / 1 planks ==
+scene                   paths     GAINHF    HF dB     GAIN    gain dB
+door CLOSED               0/8     0.1381    -17.2    0.673       -3.4
+door CLOSED               8/8     0.3048    -10.3    0.789       -2.1
+door OPEN                 0/8     1.0000      0.0    1.000        0.0
+door OPEN                 8/8     1.0000      0.0    1.000        0.0
+1x stone                  0/8     0.0111    -39.1    0.407       -7.8
+1x stone                  8/8     0.0672    -23.5    0.583       -4.7
+1x glass                  0/8     0.4066     -7.8    0.835       -1.6
+1x glass                  8/8     0.5827     -4.7    0.898       -0.9
+1x planks                 0/8     0.0842    -21.5    0.610       -4.3
+1x planks                 8/8     0.2265    -12.9    0.743       -2.6
+```
+
+（后半段"0.12.5 对照"与"为什么 0.12.5 只是稍微暗一点"原样保留在工具输出里。）
+
+### Bug 2（刺声）：排查了哪几条、各是什么结论
+
+| 怀疑 | 查证 | 结论 | 0.12.7 做了什么 |
+|---|---|---|---|
+| 播放中途改 EFX **拓扑** | `EfxEngine.applyToSource` 旧代码在 `|g - lastG| > EPS` 时**也**重发 `alSource3i(AL_AUXILIARY_SEND_FILTER, ...)`；`AL_DIRECT_FILTER` 同样每次重发 | **成立**（每次数值变化都写一次拓扑） | 接线只在"换声源"那一次做；之后**只** `alFilterf` 改数值 |
+| 参数**跳变** | `Acoustics.smooth()` 已经是按时间一阶平滑（tau = `SMOOTH_SECONDS` = **0.15 s**，`k = 1-exp(-dt/tau)`） | 已有平滑 ✓；但**第一次写**会把"1 刻的平滑量（≈28%）"一步套上 | 第一次写**先写成直通**（截止/增益=1、发送=0），之后交给平滑 |
+| 切进/切出 **DSP 兜底** | 旧 `filterMono` 入口是 `if (EfxEngine.isAvailable() \|\| !isActive() \|\| ...)`，并且一"不活跃"就把 `lpState = 0`、`smoothCutoffHz = -1` | **成立**：`isActive()` 在"回到全通"时会变假、之后又变真，重新接通时滤波器状态从 0 开始 ⇒ **一个阶跃** | **DSP 链路全程接通**，参数自己滑到全通；再也不清状态。EFX 路径下仍然一个样本都不碰（第一行就 return） |
+| **混响 slot** 被反复重写 | `setReverb` 每次都以 `alAuxiliaryEffectSloti(slot, AL_EFFECTSLOT_EFFECT, fx)` 结尾（重设 effect 到 slot 会重置混响尾音） | **成立** | 效果器**在 `init()` 里绑一次**；之后只 `alEffectf` 改参数；只有"换环境"级别的大变化才重绑一次做重同步 |
+| **位置/方向** 写入 | `smooth()` 里 `posX/Y/Z` 已经按 tau=0.15s 平滑，`applyPosition` 还有 10cm 死区 | 已有平滑 ✓（时间常数 0.15 s） | 追加**写入限频**（每 3 刻） |
+| 总能量**过载**（"直通 + 4 段发送"相加削顶） | 读代码：`AudioPipeline.loop` 里的归一化 + 软限幅（0.95 以上温和压缩）**在 `filterMono` 之外**，无条件执行 ⇒ **并没有**因为走 EFX 而被旁路。真正会越界的是 **OpenAL 混音器里"直通 + Σ发送"相加** | **部分成立**（前提要修正，见左） | 加**能量预算**：`budget = min(1, 1/(直通+Σ发送))`，直通与所有发送一起缩放，保证合计 ≤ 1.0；有余量时**不做任何衰减** |
+| 解码缓冲**欠载** | `Acoustics.tick` 的调用链：`ClientTickEvents.END_CLIENT_TICK` → `SyncService.tick` → `PlaybackController.tick` → `Acoustics.tick`，**全在客户端主线程**；射线评估**不在**解码线程/音频线程上 | 评估不会阻塞解码 | `PcmRingBuffer` 加**欠载计数**；打开调试日志后，起播 1/5 秒那行会带 `缓冲剩余空间 Xms，欠载 N 次` |
+| 写入**频率** | 旧 `EPS = 0.008`（约 0.07 dB）≈ 每 tick 都在写；`reverbDiffers` 阈值 0.02 | 成立（zipper 噪声来源之一） | 写入限频 `WRITE_INTERVAL_TICKS = 3`；`EPS = 0.02`（约 0.17 dB）；`reverbDiffers` 增益阈值 0.02→0.04、衰减时间 0.05→0.15 |
+
+**新增诊断**（`physicsSoundDebug = true`）：任何写进 OpenAL 的参数一次变化 > `2 × EPS` 就打一行
+`物理声效·参数阶跃: 直通.GAINHF 0.9000 → 0.1000（差 -0.8000，阈值 0.0400）`，最多 1 秒一条 ——
+用户听到"bip/刺声"时对着时间点看这一行即可判定"是不是我们的参数阶跃"。
+
+### ② 静态自检（真跑了）：参数阶跃 → 波形不连续
+
+```
+$ java tools/ParamSmoothTest.java
+sample rate = 48000 Hz, duration = 0.6s, switch around 0.200s
+click detector = |y[n]-2y[n-1]+y[n-2]|, worst case over 64 switch phases
+0.12.7 smoothing time constant tau = 0.15s (k = 1-exp(-dt/tau))
+
+(1) direct gain 1.0 -> 0.3
+    instant write (old)    worst click  0.465 ( 46.5% FS) | natural  0.054 | ratio    8.6x
+    time smoothed (new)    worst click  0.054 (  5.4% FS) | natural  0.054 | ratio    1.0x
+
+(2) DSP fallback chain: bypass -> engaged (400Hz one-pole lowpass)
+    state cleared (old)    worst click  0.614 ( 61.4% FS) | natural  0.054 | ratio   11.4x
+    state kept (new)       worst click  0.006 (  0.6% FS) | natural  0.006 | ratio    1.0x
+```
+
+结论（**数学层面，不是听感**）：旧的"直写目标值 + 清滤波器状态"在**最坏相位**下会产生
+**46.5% / 61.4% 满刻度**的一步跳变（是信号自身自然斜率的 **8.6× / 11.4×**），
+0.12.7 的两处改法都把它压回自然底噪（1.0×）。**听感是否消失必须由用户确认。**
+
+### 用户自查"刺声是不是本模组造成的"（三步，越简单越好）
+
+a. 「强度」设 **0**（完全不挂 EFX）→ 还有刺声吗？设 1.0 / 2.0 → 刺声随强度变多/变响吗？
+b. **同一首歌在游戏外用播放器**放（同音量、同设备）→ 也刺吗？
+c. 换**输出设备**（外放 / 另一副耳机 / USB 声卡）→ 还有吗？
+
+判定：**(b) 或 (c) 也刺 ⇒ 基本是他那边的耳机/声卡/驱动**，与本模组无关；
+**只有 (a) 的 2.0 档才刺 ⇒ 那是我们的过载**（能量预算已经先减了一道，届时报给我再调）。
+另外本机 0.19.3 实例里同时装了「**物理声效重制版**」（`sound-physics-remastered-fabric-1.20.1-1.5.1.jar`），
+它会给**所有**声音（包括原版唱片）挂自己的遮挡滤波，测本 Mod 时**建议先禁用它**，否则听感会被它盖住。
+
+### 已知限制 / 未验证清单（诚实版）
+
+1. **听感未验证**：本机跑不了游戏，所有"变闷/透亮/刺声消失"的结论都只是**代码 + 数值**，必须用户实测。
+2. **精确求交有开销**：`occlusionAt` 现在每遇到一个有碰撞体积的格子就做一次
+   `VoxelShape.raycast`（主射线 + 8 条偏移射线，5Hz）。理论上更贵，
+   日志里的 `评估耗时=…ms` 可核对（0.12.6 实测约 1ms/次）；若明显上升再考虑加"满格形状走快路径"。
+3. **重绑 effect 的假设**：0.12.7 假设 OpenAL Soft 会立刻把 `alEffectf` 的变化应用到正在播放的声音上
+   （所以不再每次重绑）。这一条**没能在真机上验证**；万一混响变成"改参数不生效"，
+   现成的退路是把 `EfxEngine.boundDiffersALot` 的阈值调到很小（等价于每次都重绑）。
+4. **能量预算是保守的**：EAXReverb 自己的 `gain = 0.32` 会再压一道湿声，所以实际衰减可能比需要的多一点点；
+   代价是"混响多的场景总音量略降"，换来的是不会削顶。
+5. **门的实测数值依赖方块真实碰撞形状**：工具里的 0.44 是"WOOD 0.55 × 非不透明 0.8"，
+   与"门的碰撞形状到底是不是满格"无关（新规则只看"射线有没有真的穿过形状"）；
+   但**射线擦着门边过**的时候可能判成"没挡住" —— 这是"精确"的代价，属于预期行为。
+6. **0.19.5 实例通电运行中**：装机时旧 jar 被占用删不掉，用户需关掉游戏后手动删
+   `...\1.20.1-Fabric 0.19.5\mods\clouddisc-0.12.6.jar`（0.19.3 已装好且干净）。
+
+---
+
 ## 0.12.6
 
 **物理声效调参 + 材质探针（M7）：让"隔墙变闷"明显到一耳朵能听出来**

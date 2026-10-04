@@ -1,0 +1,87 @@
+﻿CloudDisc 0.12.7 —— 物理声效桌面复算 / 静态自检的原始输出
+（生成方式：java tools/AcousticsMath.java 与 java tools/ParamSmoothTest.java，JDK 17，不需要 Minecraft）
+
+================ 1) tools/AcousticsMath.java ================
+openness shared airspace (representative avgShared) = 0.90
+openness floor at shared=0.90 -> 0.1897 (0.12.5 used it unconditionally)
+
+== 0.12.7 scene table: occlusion accumulated by the ray (no relax applied) ==
+scene                  occ(0.12.7) occ(0.12.6)     GAINHF    HF dB     GAIN
+door CLOSED (oak_door)       0.44       0.22     0.1381    -17.2    0.673
+door OPEN   (oak_door)       0.00       0.00     1.0000      0.0    1.000
+1x planks   (oak)            0.55       0.55     0.0842    -21.5    0.610
+1x glass    (block)          0.20       0.20     0.4066     -7.8    0.835
+1x stone    (block)          1.00       1.00     0.0111    -39.1    0.407
+2x stone    (stacked)        2.00       2.00     0.0050    -46.0    0.165
+
+  door CLOSED vs OPEN = the audible gap the user asked for:
+    closed GAINHF 0.1381 (-17.2 dB) / OPEN 1.0000 (0.0 dB) -> 17.2 dB apart in HF
+    old 0.12.6 closed GAINHF 0.3716 (-8.6 dB) -> only 8.6 dB apart ("almost the same")
+
+== relax (leak) rule: old 0.12.6 vs new 0.12.7 ==
+open/8       relax(old)   relax(new) occ@door0.44  GAINHF@door
+0/8                0.00         0.00 0.44 (old 0.44)       0.1381
+1/8                0.28         0.00 0.44 (old 0.32)       0.1381
+2/8                0.57         0.00 0.44 (old 0.19)       0.1381
+3/8                0.85         0.00 0.44 (old 0.07)       0.1381
+4/8                0.85         0.00 0.44 (old 0.07)       0.1381
+5/8                0.85         0.00 0.44 (old 0.07)       0.1381
+6/8                0.85         0.13 0.38 (old 0.07)       0.1798
+7/8                0.85         0.27 0.32 (old 0.07)       0.2341
+8/8                0.85         0.40 0.26 (old 0.07)       0.3048
+
+  the reported bug in one line: a 1-thick wall / a closed door easily gets 3-4 clear
+  offset rays, so the OLD rule wiped ~85% of the occlusion while the door was CLOSED:
+    open=3/8 : 0.12.6 GAINHF 0.7430 (-2.6 dB)  ->  0.12.7 GAINHF 0.1381 (-17.2 dB)
+    open=4/8 : 0.12.6 GAINHF 0.7430 (-2.6 dB)  ->  0.12.7 GAINHF 0.1381 (-17.2 dB)
+    open=5/8 : 0.12.6 GAINHF 0.7430 (-2.6 dB)  ->  0.12.7 GAINHF 0.1381 (-17.2 dB)
+
+== acceptance table: door closed / door open / 1 stone / 1 glass / 1 planks ==
+   (relax paths = the two extremes: 0/8 clear = worst case, 8/8 clear = best case)
+scene                   paths     GAINHF    HF dB     GAIN    gain dB
+door CLOSED               0/8     0.1381    -17.2    0.673       -3.4
+door CLOSED               8/8     0.3048    -10.3    0.789       -2.1
+door OPEN                 0/8     1.0000      0.0    1.000        0.0
+door OPEN                 8/8     1.0000      0.0    1.000        0.0
+1x stone                  0/8     0.0111    -39.1    0.407       -7.8
+1x stone                  8/8     0.0672    -23.5    0.583       -4.7
+1x glass                  0/8     0.4066     -7.8    0.835       -1.6
+1x glass                  8/8     0.5827     -4.7    0.898       -0.9
+1x planks                 0/8     0.0842    -21.5    0.610       -4.3
+1x planks                 8/8     0.2265    -12.9    0.743       -2.6
+
+== 0.12.7 material separation (GAINHF, 20log10) - unchanged from 0.12.6 ==
+  glass 0.4066 ( -7.8 dB) | wood 0.0842 (-21.5 dB) | stone 0.0111 (-39.1 dB)
+  glass/wood ratio 4.83x (13.7 dB apart), wood/stone ratio 7.58x (17.6 dB apart)
+
+== 0.12.5 (oldest: k=3.0, no gate, gain^0.1, floor 0.02, geometry x0.5) ==
+scene                         occ     GAINHF    HF dB     GAIN
+door CLOSED (oak_door)       0.33     0.3716     -8.6    0.906
+door OPEN   (oak_door)       0.00     1.0000      0.0    1.000
+1x planks   (oak)            0.82     0.1897    -14.4    0.847
+1x glass    (block)          0.20     0.5488     -5.2    0.942
+1x stone    (block)          1.00     0.1897    -14.4    0.847
+2x stone    (stacked)        2.00     0.1897    -14.4    0.847
+
+== why 0.12.5 felt weak: 1x stone wall ==
+  raw exp(-1.0*3.0)            = 0.0498  (-26.1 dB) <- what physics says
+  after unconditional openness = 0.1897  (-14.4 dB) <- what was actually sent
+  0.12.7 sends                 = 0.0111  (-39.1 dB)
+
+(audibility is NOT verified here - only the numbers. Please judge by ear in game.)
+================ 2) tools/ParamSmoothTest.java ================
+sample rate = 48000 Hz, duration = 0.6s, switch around 0.200s
+click detector = |y[n]-2y[n-1]+y[n-2]|, worst case over 64 switch phases
+0.12.7 smoothing time constant tau = 0.15s (k = 1-exp(-dt/tau))
+
+(1) direct gain 1.0 -> 0.3
+    instant write (old)    worst click  0.465 ( 46.5% FS) | natural  0.054 | ratio    8.6x
+    time smoothed (new)    worst click  0.054 (  5.4% FS) | natural  0.054 | ratio    1.0x
+
+(2) DSP fallback chain: bypass -> engaged (400Hz one-pole lowpass)
+    state cleared (old)    worst click  0.614 ( 61.4% FS) | natural  0.054 | ratio   11.4x
+    state kept (new)       worst click  0.006 (  0.6% FS) | natural  0.006 | ratio    1.0x
+
+read: 'worst click' is the discontinuity the ear can hear; 'natural' is what
+the steady signal alone produces. Whether the user's ear issue is gone must
+still be judged by the user - this tool only measures the maths.

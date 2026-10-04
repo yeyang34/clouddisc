@@ -3,6 +3,8 @@ package dev.clouddisc.audio;
 import net.minecraft.block.BlockState;
 import net.minecraft.sound.BlockSoundGroup;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.BlockView;
 
 import java.util.ArrayList;
@@ -25,8 +27,10 @@ import java.util.Map;
  *   <li><b>基础值取"方块声音组"</b>（{@link BlockState#getSoundGroup()}，即 {@link BlockSoundGroup}
  *       的那些单例：石/木/羊毛/玻璃/金属…）。理由是：声音组本来就是"这个方块听起来像什么材质"
  *       的官方分类，用它当材质类别最省事、也最不容易跑偏。</li>
- *   <li><b>再按几何打折</b>：{@link BlockState#isOpaqueFullCube} 为假（楼梯/栅栏/玻璃板…）→
- *       遮挡 × {@link #NON_FULL_BLOCK_OCCLUSION}。一条缝就该让遮挡降下来。</li>
+ *   <li><b>几何不再"打折"，改成精确判定</b>（0.12.7）：老版本用 {@code isOpaqueFullCube} 为假就
+ *       ×{@link #NON_FULL_BLOCK_OCCLUSION} 来近似"楼梯/栅栏/玻璃板有缝"，但关着的门也踩这条，
+ *       结果门的遮挡被砍掉一半。现在由 {@link #blocksRay}（射线 vs 碰撞形状求交）回答
+ *       "这条线到底有没有被挡住"：真挡住了就按材质值算，没挡住就一分不算。</li>
  *   <li><b>液体</b>：{@code getFluidState()} 非空 → 遮挡大幅下调（水几乎不挡声，但很吸声）。</li>
  *   <li><b>硬度微调</b>：硬度 &lt; 0（基岩/屏障这类"不可破坏"）算满遮挡；
  *       硬度 == 0（火把/作物/花这类一碰就碎）→ 遮挡 ×0.35。</li>
@@ -45,9 +49,21 @@ import java.util.Map;
  *       石头 1.00，而当时 {@code exp(-occ*3)} 又会让木板和石头同时饱和到"几乎一样闷"，
  *       三档听不出区别（详见 docs/物理声效实现计划.md 的"调参记录"）。</li>
  * </ol>
+ *
+ * <h2>0.12.7 的几何判定（修"门关着和开着一样"）</h2>
+ * <p>0.12.6 之前，遮挡值里有一条 {@code isOpaqueFullCube()} 为假就"×0.5"的<b>几何打折</b>。
+ * 关着的木门正好两条都踩：它不是 opaque（{@code ×0.8}），也不是"不透明完整方块"（{@code ×0.5}）
+ * —— 木门基础 0.55 → 实际只累加 <b>0.22</b>，截止 {@code exp(-0.22×4.5) = 0.37}，只是"稍微暗一点"。
+ * <p>0.12.7 起改为<b>几何问题交给射线精确判定</b>：只有射线<b>真的与这一格的碰撞形状求交命中</b>
+ * （{@link #blocksRay}）才累加，累加值就是<b>材质值本身</b>（不再做 {@code ×0.5}）。
+ * 于是：关着的门（射线真的穿过门板）= 0.44，门开着（碰撞形状为空）= 0；
+ * 楼梯/栅栏的缝（射线从空隙里过）= 0，不再被当成"实心格子"白算一笔。
  */
 public final class BlockAcoustics {
-	/** 不是完整方块时的遮挡折扣（与 SPR 的 nonFullBlockOcclusionFactor 同一个量级，数值自己定）。 */
+	/**
+	 * 0.12.7 起<b>不再参与遮挡累加</b>：几何由 {@link #blocksRay} 精确判定
+	 * （射线真的命中碰撞形状才算挡），这里只保留一个数值给探针日志做"这个形状不满一格"的提示。
+	 */
 	public static final float NON_FULL_BLOCK_OCCLUSION = 0.5f;
 	/**
 	 * 兜底材质（认不出声音组时）。
@@ -86,20 +102,46 @@ public final class BlockAcoustics {
 	}
 
 	/**
-	 * 实际用于"沿连线"累加的遮挡值：材质基础值 + 几何/液体/硬度修正。
-	 * <p>需要 {@code world/pos} 只是为了 {@link BlockState#isOpaqueFullCube}（它可能跟位置有关）。
+	 * 实际用于"沿连线"累加的遮挡值 = 材质基础值（已含声音组 / 液体 / 硬度 / 非不透明这些<b>材质级</b>修正）。
+	 *
+	 * <p><b>0.12.7 改了这里</b>：不再做"非完整方块 ×{@value #NON_FULL_BLOCK_OCCLUSION}"的<b>几何</b>打折。
+	 * 原因（就是"门关着和开着一样闷"的一半根因）：关着的木门既不是 opaque（派生时 ×0.8）、
+	 * 又不是"不透明完整方块"（这里再 ×0.5），0.55 → 只剩 0.22，截止 0.37 —— 只是"稍微暗一点"。
+	 * 现在几何交给 {@link #blocksRay}：<b>射线真的穿不过这一格的碰撞形状才累加</b>，
+	 * 累加的就是材质值本身（关着的门 0.44、门开着 0、楼梯的缝 0）。
 	 */
-	public static float occlusionOf(BlockState state, BlockView world, BlockPos pos) {
-		Params p = of(state);
-		float occ = p.occlusion();
+	public static float occlusionOf(BlockState state) {
+		return of(state).occlusion();
+	}
+
+	/**
+	 * <b>0.12.7 新增</b>：这一格确实在射线上（DDA 已确认），射线是否<b>真的命中它的碰撞形状</b>。
+	 *
+	 * <p>为什么需要它：DDA 只告诉我们"射线穿过了哪一格"，而"格子里有碰撞体积"不等于
+	 * "射线被挡住了" —— 楼梯、栅栏、玻璃板、活板门都有碰撞体积，但射线完全可能从缝隙里过。
+	 * 老实现把这种格子整格当成实心累加，再靠 {@code isOpaqueFullCube} 打个对折来"补偿"，
+	 * 结果就是"关着的门被判成一条缝"。
+	 *
+	 * <p>顺带这也是"关着的门 / 开着的门"的判据：开着的门碰撞形状为空 → 返回 false → 不累加；
+	 * 关着的门碰撞形状非空且射线穿过门板 → 返回 true → 按材质值累加。
+	 *
+	 * @return true = 这条射线被本格的材料挡住了
+	 */
+	public static boolean blocksRay(BlockState state, BlockView world, BlockPos pos, Vec3d from, Vec3d to) {
+		VoxelShape shape;
 		try {
-			if (!state.isOpaqueFullCube(world, pos)) {
-				occ *= NON_FULL_BLOCK_OCCLUSION;
-			}
-		} catch (Throwable ignored) {
-			// 位置相关的判定失败就按"完整方块"算
+			shape = state.getCollisionShape(world, pos);
+		} catch (Throwable t) {
+			return true; // 取不到形状：保守地按"挡"处理（宁可闷一点，也不要漏挡）
 		}
-		return occ;
+		if (shape.isEmpty()) {
+			return false;
+		}
+		try {
+			return shape.raycast(from, to, pos) != null;
+		} catch (Throwable t) {
+			return true; // 求交失败同样保守处理
+		}
 	}
 
 	/** 反射率（混响射线用）。 */
@@ -151,7 +193,9 @@ public final class BlockAcoustics {
 			abs = Math.max(abs, 0.85f);
 			source = source + "｜液体(遮挡×0.15)";
 		} else {
-			// 非完整方块（楼梯/栅栏/草/花/铁栏杆…）：缝隙多，遮挡打折
+			// 不透明方块（玻璃/门/活板门/栅栏/铁栏杆…）：材质本身就"透一点声"，遮挡按材质打折。
+			// 注意这**不是**几何判定 —— 几何由 blocksRay 精确回答"这条线有没有被挡住"，
+			// 所以关着的门（不透明=false）走这里 ×0.8 → 0.44，仍然远高于"一条缝"。
 			if (!opaque) {
 				occ *= 0.8f;
 				source = source + "｜非不透明方块(遮挡×0.8)";
@@ -180,7 +224,7 @@ public final class BlockAcoustics {
 	 * <p><b>0.12.6 的遮挡值调整（拉开对比，配合 k=4.5）</b>：目标是"玻璃只轻微闷、木板中间、石头最闷"。
 	 * 旧值括号里是 0.12.5 的数：
 	 * <pre>
-	 *   玻璃 0.50（不变，非完整方块再打折后实际 0.20，截止 ≈ 0.41）
+	 *   玻璃 0.50 → 0.25（0.12.7 改：删掉"非完整方块×0.5"后，乘 ×0.8 仍实际 0.20，截止 ≈ 0.41 不变）
 	 *   木板 0.82 → 0.55（截止 ≈ 0.08）
 	 *   石头 1.00（不变，截止 ≈ 0.01）
 	 *   沙土 0.75 → 0.70    深板岩/石头保持 1.00    黏液 0.60 → 0.50
@@ -202,12 +246,14 @@ public final class BlockAcoustics {
 			return new Base("声音组 METAL(金属/矿石)", 1.00f, 0.85f, 0.12f);
 		}
 		// ---- 玻璃 / 水晶：透声但很亮（高频反射强）----
-		// 遮挡 0.50（非不透明 ×0.8、非完整方块 ×0.5 之后实际约 0.20）→ 截止 ≈ 0.41（只轻微闷）
+		// 0.12.7：基础值 0.50 → 0.25。因为"非完整方块 ×0.5"这条几何打折已经删掉
+		// （几何改由 blocksRay 精确判定），乘上派生的"非不透明 ×0.8"后仍是 **0.20** ——
+		// 与 0.12.6 实际下发值完全一致，玻璃那一档的听感不变。
 		if (g == BlockSoundGroup.GLASS || g == BlockSoundGroup.AMETHYST_BLOCK
 				|| g == BlockSoundGroup.AMETHYST_CLUSTER || g == BlockSoundGroup.SMALL_AMETHYST_BUD
 				|| g == BlockSoundGroup.MEDIUM_AMETHYST_BUD || g == BlockSoundGroup.LARGE_AMETHYST_BUD
 				|| g == BlockSoundGroup.FROGLIGHT || g == BlockSoundGroup.SHROOMLIGHT) {
-			return new Base("声音组 GLASS(玻璃/水晶)", 0.50f, 0.90f, 0.10f);
+			return new Base("声音组 GLASS(玻璃/水晶)", 0.25f, 0.90f, 0.10f);
 		}
 		// ---- 羊毛 / 苔藓 / 雪：强吸声，几乎不反射 ----
 		if (g == BlockSoundGroup.WOOL || g == BlockSoundGroup.MOSS_CARPET || g == BlockSoundGroup.MOSS_BLOCK
@@ -287,25 +333,39 @@ public final class BlockAcoustics {
 	 * <p>格式（{@code physicsSoundDebug=true} 时由 {@link Acoustics} 每轮评估最多打 6 条）：
 	 * <pre>
 	 * minecraft:stone → 遮挡=1.00 反射率=0.60 吸声=0.45（来源=声音组 STONE(石头)）
-	 * minecraft:glass → 遮挡=0.20 反射率=0.90 吸声=0.10（来源=声音组 GLASS(玻璃/水晶)｜非不透明方块(遮挡×0.8)｜非完整方块打折 ×0.50）
-	 * minecraft:some_mod_block → 遮挡=0.90 …（来源=默认值（未识别的声音组））
+	 * minecraft:glass → 遮挡=0.20 反射率=0.90 吸声=0.10（来源=…GLASS…｜非不透明方块(遮挡×0.8)）
+	 * minecraft:oak_door → 遮挡=0.44 反射率=0.30 吸声=0.55（来源=…WOOD…｜非不透明方块(遮挡×0.8)）
 	 * </pre>
 	 * <b>看到"来源=默认值"就说明材质表退化了</b>（声音组的恒等比较没匹配上，全走了兜底）。
+	 *
+	 * <p><b>0.12.7</b>：这里打的 {@code 遮挡=} 就是射线累加真正用的那个数
+	 * （材质值，<b>不含</b>"非完整方块打折"）—— 探针数字和听感终于对得上了。
+	 * 另外补一句"碰撞形状"提示（满格 / 不满格），便于判断"这格是不是只挡了一部分"。
 	 */
 	public static String probeLine(BlockState state, BlockView world, BlockPos pos) {
 		Params p = of(state);
 		String src = p.source();
-		try {
-			if (!state.isOpaqueFullCube(world, pos)) {
-				src = src + "｜非完整方块打折 ×" + fmt2(NON_FULL_BLOCK_OCCLUSION);
-			}
-		} catch (Throwable ignored) {
-			// 位置相关的判定失败就算了
+		if (!isFullCellShape(state, world, pos)) {
+			src = src + "｜碰撞形状不满格（几何由射线求交判定）";
 		}
-		return blockId(state) + " → 遮挡=" + fmt2(occlusionOf(state, world, pos))
+		return blockId(state) + " → 遮挡=" + fmt2(occlusionOf(state))
 				+ " 反射率=" + fmt2(p.reflectivity())
 				+ " 吸声=" + fmt2(p.absorption())
 				+ "（来源=" + src + "）";
+	}
+
+	/** 诊断用：碰撞形状的包围盒是不是填满整格（满格 = 实心/门这类"整格挡住视线"的方块）。 */
+	private static boolean isFullCellShape(BlockState state, BlockView world, BlockPos pos) {
+		try {
+			if (state.getCollisionShape(world, pos).isEmpty()) {
+				return false;
+			}
+			net.minecraft.util.math.Box b = state.getCollisionShape(world, pos).getBoundingBox();
+			return b.minX <= 1.0E-7 && b.minY <= 1.0E-7 && b.minZ <= 1.0E-7
+					&& b.maxX >= 1.0 - 1.0E-7 && b.maxY >= 1.0 - 1.0E-7 && b.maxZ >= 1.0 - 1.0E-7;
+		} catch (Throwable t) {
+			return true;
+		}
 	}
 
 	/** 方块注册名（形如 {@code minecraft:stone}，中文名可能为空时用这个）。 */

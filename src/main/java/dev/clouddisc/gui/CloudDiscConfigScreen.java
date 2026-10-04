@@ -154,20 +154,26 @@ public class CloudDiscConfigScreen extends Screen {
 		row(2, "隔墙闷度 k（越大越闷，4.5=默认）",
 				cycleFloat(2, new float[] {2.0f, 3.0f, 4.0f, 4.5f, 5.0f, 6.0f, 7.0f, 9.0f},
 						() -> cfg.physicsAbsorption, v -> cfg.physicsAbsorption = (float) v));
-		row(3, "漏音通路数（几条缝才明显透声，3=默认）",
-				cycleInt(3, new int[] {1, 2, 3, 4, 5, 6, 8}, () -> cfg.physicsOcclusionPaths,
+		row(3, "漏音通路数（8 条里几条通透才放宽，6=默认）",
+				cycleInt(3, new int[] {1, 3, 4, 5, 6, 7, 8}, () -> cfg.physicsOcclusionPaths,
 						v -> cfg.physicsOcclusionPaths = v));
-		row(4, "精度·混响射线数（越大越准越贵）", cycleInt(4, new int[] {16, 24, 32, 48, 64},
+		row(4, "漏音放宽上限（最多削掉多少遮挡，0.40=默认）",
+				cycleFloat(4, new float[] {0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f},
+						() -> cfg.physicsOcclusionRelax, v -> cfg.physicsOcclusionRelax = (float) v));
+		row(5, "精度·混响射线数（越大越准越贵）", cycleInt(5, new int[] {16, 24, 32, 48, 64},
 				() -> cfg.physicsRays, v -> cfg.physicsRays = v));
-		row(5, "严格遮挡（开=墙上小缝也算墙）", toggle(5, () -> cfg.physicsStrictOcclusion, v -> cfg.physicsStrictOcclusion = v));
-		row(6, "方向性（声音从拐角绕过来）", toggle(6, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
-		row(7, "调试日志 + 材质探针（每轮打印命中方块）", toggle(7, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
-		// 第 9 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
-		int y = ROW_START + 8 * ROW_STEP + 6;
-		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
+		row(6, "严格遮挡（开=墙上小缝也算墙）", toggle(6, () -> cfg.physicsStrictOcclusion, v -> cfg.physicsStrictOcclusion = v));
+		row(7, "方向性（声音从拐角绕过来）", toggle(7, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
+		row(8, "调试日志 + 材质探针（每轮打印命中方块）", toggle(8, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
+		// 注：EFX 可用性不再单独占一行（0.12.7 加了一行"漏音放宽上限"，版面不够），
+		// 改在底部提示行里显示 —— 排障第一眼看那里（见 render）。
+	}
+
+	/** 排障用：EFX 到底可不可用（显示在物理声效页底部提示行）。 */
+	private static String efxStatusLine() {
+		return dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
-		labels.add(new Label(Text.literal("状态: " + efx), this.width / 2 + LABEL_X_OFFSET, y));
 	}
 
 	// ------------------------------------------------------- 第 3 节：网络与音源
@@ -405,8 +411,12 @@ public class CloudDiscConfigScreen extends Screen {
 			for (Label label : labels) {
 				context.drawTextWithShadow(this.textRenderer, label.text(), label.x(), label.y(), 0xE0E0E0);
 			}
+			// 物理声效页：底部这行把"EFX 可不可用"一起显示（排障第一眼看这个）
+			String bottom = section == SECTION_PHYSICS
+					? "EFX: " + efxStatusLine() + "　·　改完记得点『保存』"
+					: "改完记得点『保存』　·　带 ⚠ 的需重启游戏";
 			context.drawCenteredTextWithShadow(this.textRenderer,
-					Text.literal("改完记得点『保存』　·　带 ⚠ 的需重启游戏"), this.width / 2, this.height - 40, 0xA0A0A0);
+					Text.literal(bottom), this.width / 2, this.height - 40, 0xA0A0A0);
 		}
 		super.render(context, mouseX, mouseY, delta);
 	}

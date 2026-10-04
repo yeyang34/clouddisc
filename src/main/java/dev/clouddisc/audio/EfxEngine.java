@@ -1,6 +1,7 @@
 package dev.clouddisc.audio;
 
 import dev.clouddisc.CloudDiscClient;
+import dev.clouddisc.CloudDiscConfig;
 import org.lwjgl.openal.AL10;
 import org.lwjgl.openal.AL11;
 import org.lwjgl.openal.ALC10;
@@ -59,7 +60,31 @@ public final class EfxEngine {
 	private static final float[] lastSendCutoff = new float[MAX_BANDS];
 	/** 强制重下发的时间戳（AL 侧可能因为设备/上下文重建而丢失设置）。 */
 	private static long lastForceTick = Long.MIN_VALUE / 2;
-	private static final float EPS = 0.008f;
+	/**
+	 * "变化不足就不写"的阈值。
+	 * <p>0.12.7：0.008 → <b>0.02</b>（约 0.17 dB）。0.008 太小，等于每个 tick 都在写
+	 * OpenAL 的滤波参数 —— 这种"每 50ms 改一次增益"的写法在参数连续变化时会引入
+	 * zipper（拉链）噪声，听感就是轻微的沙沙/爆裂。0.02 仍在不可闻范围内。
+	 */
+	private static final float EPS = 0.02f;
+	/** 0.12.7：参数写入限频（刻）。每 3 刻 = 150ms 一次，配合按时间平滑，听感不变但写入次数降 2/3。 */
+	private static final int WRITE_INTERVAL_TICKS = 3;
+	private static long lastWriteTick = Long.MIN_VALUE / 2;
+	/** 0.12.7：参数阶跃诊断日志的限频（刻，20 = 1 秒）与阈值倍数。 */
+	private static long lastJumpLogTick = Long.MIN_VALUE / 2;
+	private static final float JUMP_FACTOR = 2.0f;
+	/**
+	 * 已经绑到槽位上的那组参数（只用来判断"要不要重新把 effect 绑回 slot"）。
+	 * <p>正常路径<b>只有参数变化</b>（{@code alEffectf}），<b>不再每 tick 重设 effect 到 slot</b>：
+	 * OpenAL Soft 会立刻把效果器参数变化应用到正在播放的声音上，反复
+	 * {@code alAuxiliaryEffectSloti(..., AL_EFFECTSLOT_EFFECT, ...)} 反而会让混响尾音被重置。
+	 * 只有变化特别大（换环境那种）才重绑一次做"重同步"。
+	 */
+	private static final Reverb[] slotBound = {new Reverb(), new Reverb(), new Reverb(), new Reverb()};
+	private static final boolean[] slotBoundValid = new boolean[MAX_BANDS];
+	/** 能量预算用的暂存（只在主线程用，避免每 tick 分配）。 */
+	private static final float[] SEND_GAIN_SCRATCH = new float[MAX_BANDS];
+	private static final float[] SEND_CUTOFF_SCRATCH = new float[MAX_BANDS];
 
 	/** 每个混响段的 EAXReverb 参数。数值自己推，不抄 SPR 的配置表。
 	 * <p>0.12.6：默认值整体上调（gain 0.28→0.32、decayTime 1.2→1.6、
@@ -146,6 +171,10 @@ public final class EfxEngine {
 					return;
 				}
 				EXTEfx.alEffecti(reverb[i], EXTEfx.AL_EFFECT_TYPE, EXTEfx.AL_EFFECT_EAXREVERB);
+				// 0.12.7：**在这里把效果器绑到槽位一次**（以前是每次改参数都重绑一遍，
+				// 反复 alAuxiliaryEffectSloti 会把混响尾音重置，听起来像小爆音）。
+				EXTEfx.alAuxiliaryEffectSloti(auxSlot[i], EXTEfx.AL_EFFECTSLOT_EFFECT, reverb[i]);
+				slotBoundValid[i] = false; // 还没记任何参数 → 第一次 setReverb 会写
 			}
 
 			// ② 直通低通 + 每段一个发送滤波器
@@ -210,7 +239,12 @@ public final class EfxEngine {
 		lastSourceId = 0;
 	}
 
-	/** 把某个混响段的 EAXReverb 参数灌进效果器并绑到 aux slot（只在调用方判定"变化够大"时才会调）。 */
+	/**
+	 * 把某个混响段的 EAXReverb 参数灌进效果器（只在调用方判定"变化够大"时才会调）。
+	 *
+	 * <p><b>0.12.7</b>：正常路径<b>只改参数</b>（{@code alEffectf}），不再每次都把 effect 重设到 slot
+	 * （那一步会把混响的内部状态/尾音重置）。只有参数变化特别大时才重绑一次做"重同步"。
+	 */
 	public static void setReverb(int band, Reverb p) {
 		if (!isAvailable() || band < 0 || band >= bands) {
 			return;
@@ -228,23 +262,67 @@ public final class EfxEngine {
 			EXTEfx.alEffectf(fx, EXTEfx.AL_EAXREVERB_LATE_REVERB_DELAY, p.lateReverbDelay);
 			EXTEfx.alEffectf(fx, EXTEfx.AL_EAXREVERB_AIR_ABSORPTION_GAINHF, p.airAbsorptionGainHF);
 			EXTEfx.alEffectf(fx, EXTEfx.AL_EAXREVERB_ROOM_ROLLOFF_FACTOR, 0.0f);
-			// 把效果器绑到槽位（这一步之后槽位才真的有混响）
-			EXTEfx.alAuxiliaryEffectSloti(auxSlot[band], EXTEfx.AL_EFFECTSLOT_EFFECT, fx);
+			// 参数变化特别大（换环境）才重绑一次；平时**不重绑**，避免重置混响尾音。
+			if (!slotBoundValid[band] || boundDiffersALot(slotBound[band], p)) {
+				EXTEfx.alAuxiliaryEffectSloti(auxSlot[band], EXTEfx.AL_EFFECTSLOT_EFFECT, fx);
+				copyInto(p, slotBound[band]);
+				slotBoundValid[band] = true;
+			}
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 物理声效: 设置混响参数失败（第 {} 段），本轮跳过: {}", band, t.toString());
 		}
 	}
 
+	/** 只有"换环境"级别的变化才值得重绑 effect 到 slot（重绑会重置混响尾音）。 */
+	private static boolean boundDiffersALot(Reverb a, Reverb b) {
+		return Math.abs(a.gain - b.gain) > 0.15f
+				|| Math.abs(a.decayTime - b.decayTime) > 0.80f
+				|| Math.abs(a.decayHFRatio - b.decayHFRatio) > 0.20f
+				|| Math.abs(a.lateReverbGain - b.lateReverbGain) > 0.20f;
+	}
+
+	/** 把一批参数拷进另一个对象（不分配；只在本文件内用）。 */
+	private static void copyInto(Reverb from, Reverb to) {
+		to.gain = from.gain;
+		to.gainHF = from.gainHF;
+		to.decayTime = from.decayTime;
+		to.decayHFRatio = from.decayHFRatio;
+		to.reflectionsGain = from.reflectionsGain;
+		to.lateReverbGain = from.lateReverbGain;
+		to.lateReverbDelay = from.lateReverbDelay;
+		to.density = from.density;
+		to.diffusion = from.diffusion;
+		to.airAbsorptionGainHF = from.airAbsorptionGainHF;
+	}
+
 	/**
 	 * 把参数写进我们自己的声源。
+	 *
+	 * <h2>0.12.7 的三处改动（都是为了"播放中途不要有台阶"）</h2>
+	 * <ol>
+	 *   <li><b>接线只做一次</b>：{@code AL_DIRECT_FILTER} 与 4 个
+	 *       {@code AL_AUXILIARY_SEND_FILTER} 只在"换声源"那一次接上；之后播放期间
+	 *       <b>只改滤波器数值</b>（{@code alFilterf}）。旧实现在数值变化时也重发
+	 *       {@code alSource3i(..., AL_AUXILIARY_SEND_FILTER, ...)}，那是<b>改拓扑</b>，
+	 *       播放中途做会有可闻的爆音/咔嗒声。</li>
+	 *   <li><b>能量预算</b>：直通增益与所有发送增益一起按
+	 *       {@code budget = min(1, 1/(直通+Σ发送))} 缩放，保证
+	 *       {@code 直通 + Σ发送 ≤ 1.0}。EFX 的混响是在 OpenAL 混音器里与直通<b>相加</b>的，
+	 *       0.12.6 又把发送基准提到 1.6、EAXReverb gain 提到 0.32 —— 合计很容易越过 0 dBFS
+	 *       而被输出端削顶（听感就是"接触不良"的刺声）。有余量时不做任何衰减。</li>
+	 *   <li><b>写入限频 + 更大阈值</b>：每 {@value #WRITE_INTERVAL_TICKS} 刻才写一次，
+	 *       且单个参数变化 &lt; {@value #EPS} 就不写（旧值 0.008 太小，近似每 tick 都在写）。</li>
+	 * </ol>
 	 *
 	 * @param sourceId     OpenAL source id（必须是我们自己那条声音的）
 	 * @param directCutoff 直通高频增益 0..1（1 = 完全通透）
 	 * @param directGain   直通总增益 0..1
 	 * @param sendGain     每段混响发送增益 0..1（长度 ≥ {@link #bands()}）
 	 * @param sendCutoff   每段混响发送的高频增益 0..1
+	 * @param nowTick      当前游戏刻（写入限频用；不需要限频时可以传 0）
 	 */
-	public static void applyToSource(int sourceId, float directCutoff, float directGain, float[] sendGain, float[] sendCutoff) {
+	public static void applyToSource(int sourceId, float directCutoff, float directGain, float[] sendGain,
+			float[] sendCutoff, long nowTick) {
 		if (!isAvailable() || sourceId == 0) {
 			return;
 		}
@@ -263,34 +341,103 @@ public final class EfxEngine {
 					lastSendGain[i] = -1.0f;
 					lastSendCutoff[i] = -1.0f;
 				}
+			} else if (nowTick != 0L && nowTick - lastWriteTick < WRITE_INTERVAL_TICKS) {
+				return; // 限频：两次写入之间至少隔 WRITE_INTERVAL_TICKS 刻
 			}
+			lastWriteTick = nowTick;
 
+			// ---- 能量预算（见方法注释 ②）----
+			// 用预分配的暂存数组：applyToSource 只在客户端主线程调用（Acoustics.tick），
+			// 不做每 tick 的堆分配。
+			float[] sg = SEND_GAIN_SCRATCH;
+			float[] sc = SEND_CUTOFF_SCRATCH;
+			float sumSend = 0.0f;
+			for (int i = 0; i < MAX_BANDS; i++) {
+				sg[i] = clamp01(sendGain != null && i < sendGain.length ? sendGain[i] : 0.0f);
+				sc[i] = clamp01(sendCutoff != null && i < sendCutoff.length ? sendCutoff[i] : 1.0f);
+				if (i < bands) {
+					sumSend += sg[i];
+				}
+			}
 			float dc = clamp01(directCutoff);
 			float dg = clamp01(directGain);
+			float total = dg + sumSend;
+			float budget = total > 1.0f ? 1.0f / total : 1.0f;
+			dg *= budget;
+			for (int i = 0; i < MAX_BANDS; i++) {
+				sg[i] *= budget;
+			}
+
+			// ---- 直通滤波器：接线只在换声源时做一次，之后只改数值 ----
 			if (force || Math.abs(dc - lastDirectCutoff) > EPS || Math.abs(dg - lastDirectGain) > EPS) {
 				EXTEfx.alFilterf(directFilter, EXTEfx.AL_LOWPASS_GAIN, dg);
 				EXTEfx.alFilterf(directFilter, EXTEfx.AL_LOWPASS_GAINHF, dc);
-				AL10.alSourcei(sourceId, EXTEfx.AL_DIRECT_FILTER, directFilter);
+				if (force) {
+					AL10.alSourcei(sourceId, EXTEfx.AL_DIRECT_FILTER, directFilter); // 拓扑：只此一次
+				}
+				logJump("直通", "GAINHF", lastDirectCutoff, dc, nowTick);
+				logJump("直通", "GAIN", lastDirectGain, dg, nowTick);
 				lastDirectCutoff = dc;
 				lastDirectGain = dg;
 			}
 
+			// ---- 发送：同样是"接线一次、之后只改数值" ----
 			for (int i = 0; i < bands; i++) {
-				float g = clamp01(sendGain != null && i < sendGain.length ? sendGain[i] : 0.0f);
-				float c = clamp01(sendCutoff != null && i < sendCutoff.length ? sendCutoff[i] : 1.0f);
-				if (force || Math.abs(g - lastSendGain[i]) > EPS || Math.abs(c - lastSendCutoff[i]) > EPS) {
-					EXTEfx.alFilterf(sendFilter[i], EXTEfx.AL_LOWPASS_GAIN, g);
-					EXTEfx.alFilterf(sendFilter[i], EXTEfx.AL_LOWPASS_GAINHF, c);
-					// 段号 i ↔ 发送序号 i：槽位与序号固定绑定，避免每 tick 改动发送拓扑
-					AL11.alSource3i(sourceId, EXTEfx.AL_AUXILIARY_SEND_FILTER, auxSlot[i], i, sendFilter[i]);
-					lastSendGain[i] = g;
-					lastSendCutoff[i] = c;
+				if (force || Math.abs(sg[i] - lastSendGain[i]) > EPS || Math.abs(sc[i] - lastSendCutoff[i]) > EPS) {
+					EXTEfx.alFilterf(sendFilter[i], EXTEfx.AL_LOWPASS_GAIN, sg[i]);
+					EXTEfx.alFilterf(sendFilter[i], EXTEfx.AL_LOWPASS_GAINHF, sc[i]);
+					if (force) {
+						// 段号 i ↔ 发送序号 i：槽位与序号固定绑定，播放期间不再改动
+						AL11.alSource3i(sourceId, EXTEfx.AL_AUXILIARY_SEND_FILTER, auxSlot[i], i, sendFilter[i]);
+					}
+					logJump("发送" + i, "GAIN", lastSendGain[i], sg[i], nowTick);
+					logJump("发送" + i, "GAINHF", lastSendCutoff[i], sc[i], nowTick);
+					lastSendGain[i] = sg[i];
+					lastSendCutoff[i] = sc[i];
 				}
 			}
 			logAlError("写入声源参数");
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 物理声效: 写 EFX 参数失败 → 本轮跳过（不影响播放）: {}", t.toString());
 		}
+	}
+
+	/**
+	 * <b>参数阶跃诊断</b>（{@code physicsSoundDebug=true} 时）：某个写进 OpenAL 的参数一次变化超过
+	 * {@code 2 × EPS} 就打一行"旧值 / 新值 / 差值"，最多 1 秒一条。
+	 * <p>用途：用户听到"bip / 刺声"时，对着时间点看这一行 —— 如果那一刻正好有一条大跳变，
+	 * 就是我们的参数阶跃；如果没有任何跳变（或根本不是这段时间），那声音不是我们造成的。
+	 */
+	private static void logJump(String what, String param, float oldV, float newV, long nowTick) {
+		if (oldV < -0.5f) {
+			return; // 第一次写（旧值哨兵 -1）：不算"变化"
+		}
+		float diff = newV - oldV;
+		if (Math.abs(diff) <= JUMP_FACTOR * EPS) {
+			return;
+		}
+		if (!debugOn()) {
+			return;
+		}
+		if (nowTick != 0L && nowTick - lastJumpLogTick < 20L) {
+			return; // 限频：1 秒最多一条
+		}
+		lastJumpLogTick = nowTick;
+		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效·参数阶跃: {}.{} {} → {}（差 {}，阈值 {}）",
+				what, param, fmt(oldV), fmt(newV), fmt(diff), fmt(JUMP_FACTOR * EPS));
+	}
+
+	private static boolean debugOn() {
+		try {
+			CloudDiscConfig cfg = CloudDiscConfig.get();
+			return cfg != null && cfg.physicsSoundDebug;
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	private static String fmt(float v) {
+		return String.format(java.util.Locale.ROOT, "%.4f", v);
 	}
 
 	/**

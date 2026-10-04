@@ -19,6 +19,13 @@ public final class PcmRingBuffer {
 	private int available;
 	private boolean finished;
 	private volatile boolean starved;
+	/**
+	 * 欠载次数（0.12.7 新增）：读端一次没凑满 len 字节就 +1。
+	 * <p>用途：怀疑"刺声/噼啪是解码供不上"时，这是最直接的证据 ——
+	 * 打开 {@code physicsSoundDebug} 后，日志里"声音引擎已消费 … 缓冲积压 … 欠载=次"里的
+	 * 欠载次数一直在涨，说明确实是供不上；一直是 0，就与欠载无关。
+	 */
+	private int starveCount;
 
 	public PcmRingBuffer(int capacityBytes) {
 		int cap = Integer.highestOneBit(Math.max(1024, capacityBytes - 1)) << 1;
@@ -35,6 +42,11 @@ public final class PcmRingBuffer {
 
 	public boolean starved() {
 		return starved;
+	}
+
+	/** 欠载次数（诊断用，见字段注释）。 */
+	public synchronized int starveCount() {
+		return starveCount;
 	}
 
 	/** 解码线程：写入；缓冲满则阻塞等待（对解码线程形成天然背压）。 */
@@ -103,10 +115,12 @@ public final class PcmRingBuffer {
 				return -1; // 真 EOF
 			}
 			starved = true;
+			starveCount++;
 			return 0; // 欠载
 		}
 		if (got < len) {
 			starved = true;
+			starveCount++;
 		}
 		return got;
 	}

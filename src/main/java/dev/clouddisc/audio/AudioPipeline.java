@@ -229,8 +229,10 @@ public final class AudioPipeline implements AutoCloseable {
 					// 日志里峰值打出 32230 这种不可能的数字）。
 					buf[len + f] = sum / (float) inChannels / 32768.0f;
 				}
-				// 唱片机物理声效：按遮挡度对这一段（已下混、已归一化）做低通
-				// —— 隔墙变闷、远处高频先没。完全通畅时 isActive() 为假，不碰任何样本。
+				// 唱片机物理声效（DSP 兜底路径）：按遮挡度对这一段（已下混、已归一化）做低通
+				// —— 隔墙变闷、远处高频先没。
+				// 0.12.7：EFX 可用时这里**一个样本都不碰**（filterMono 第一行就返回）；
+				// EFX 不可用时链路**全程接通**（参数滑到全通而不是"关掉链路"），避免状态清零导致的阶跃。
 				Acoustics.filterMono(buf, len, frames, inRate);
 				len += frames;
 			}
