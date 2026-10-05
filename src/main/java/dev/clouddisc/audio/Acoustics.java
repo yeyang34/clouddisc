@@ -747,7 +747,7 @@ public final class Acoustics {
 	/** 距离衰减：混响发送在这么远之外完全消失。 */
 	private static final float REVERB_FADE_DISTANCE = 48.0f;
 	/** 0.12.6：发送基准整体提升（用户反馈"余响偏含蓄"，但优先级低于"变闷"）。 */
-	private static final float SEND_BOOST = 1.6f;
+	private static final float SEND_BOOST = 2.08f;
 	/** 每次评估最多做多少次"命中点 → 耳朵通不通"的测试（只在被挡时做）。 */
 	private static final int MAX_CLEAR_LINE_TESTS = 48;
 
