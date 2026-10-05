@@ -510,7 +510,7 @@ public final class Acoustics {
 			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
 			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
 			int pathLen = pathLengthTo(world, jukebox, ear);
-			if (pathLen > 0) {
+			if (pathLen > 0 && pathLen <= center.distanceTo(ear) * 2.5) {
 				double straight = Math.max(0.5, center.distanceTo(ear));
 				double detour = Math.max(0.0, pathLen / straight - 1.0);
 				double f = Math.max(0.05, 1.0 / (1.0 + 10.0 * detour));
@@ -1371,6 +1371,13 @@ public final class Acoustics {
 					try {
 						bs = world.getBlockState(n);
 					} catch (Throwable e) {
+						continue;
+					}
+					// 【0.12.68】高度限制：真正的门道/走廊都在同一层；爬到屋顶/墙头上属于
+					// 【边缘绕射】而非"走一条路"，必须排除（实测楼梯屋顶与房子都被"穿"过）。
+					int yLo = Math.min(from.getY(), to.getY()) - 1;
+					int yHi = Math.max(from.getY(), to.getY()) + 1;
+					if (n.getY() < yLo || n.getY() > yHi) {
 						continue;
 					}
 					if (!walkableCell(world, n)) {
