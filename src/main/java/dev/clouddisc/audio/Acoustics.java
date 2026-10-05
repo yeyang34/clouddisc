@@ -1518,7 +1518,7 @@ public final class Acoustics {
 				if (dist.containsKey(n)) {
 					continue;
 				}
-				if (!freeAt(world, n)) {
+				if (!canPass(world, p, n)) {
 					continue; // 空气才连通；墙/关着的门切断体积 ✓
 				}
 				dist.put(n, d + 1);
@@ -1526,6 +1526,59 @@ public final class Acoustics {
 			}
 		}
 		return dist;
+	}
+
+	/**
+	 * 【0.13.4】能否从 a 格走到 b 格 —— 纯几何判定（不看任何方块属性，mod 方块同样正确）。
+	 *
+	 * <p>做法：在 a、b 两格【共享的那个面】上放一个"薄盒"（沿面 0.6 宽、1.8 高、跨面 ±0.05），
+	 * 与两格的碰撞形状求交。
+	 * <ul>
+	 *   <li>关着的门：薄板横在这个面上 → 相交 → 挡 ✓</li>
+	 *   <li>开着的门：同一块薄板转了 90°、贴在侧面 → 不相交 → 通 ✓✓</li>
+	 *   <li>栅栏/楼梯/半砖/活板门：按各自真实几何 ✓</li>
+	 * </ul>
+	 * 这等价于"玩家 0.6×1.8 的身体能不能挤过去"，也是 Minecraft 自己的判定思路。
+	 */
+	private static boolean canPass(World world, BlockPos a, BlockPos b) {
+		try {
+			double x0, y0, z0, x1, y1, z1;
+			double lo = 0.2, hi = 0.8; // 沿面方向留出 0.6 宽的身体
+			double t = 0.05;           // 跨面厚度
+			if (a.getX() != b.getX()) {
+				double fx = Math.max(a.getX(), b.getX());
+				x0 = fx - t; x1 = fx + t;
+				z0 = b.getZ() + lo; z1 = b.getZ() + hi;
+				y0 = b.getY() + 0.001; y1 = b.getY() + 1.8;
+			} else if (a.getZ() != b.getZ()) {
+				double fz = Math.max(a.getZ(), b.getZ());
+				z0 = fz - t; z1 = fz + t;
+				x0 = b.getX() + lo; x1 = b.getX() + hi;
+				y0 = b.getY() + 0.001; y1 = b.getY() + 1.8;
+			} else {
+				// 上下走（楼梯/台阶）：只要目标格脚部位置没被挡
+				x0 = b.getX() + lo; x1 = b.getX() + hi;
+				z0 = b.getZ() + lo; z1 = b.getZ() + hi;
+				double fy = Math.max(a.getY(), b.getY());
+				y0 = fy + 0.001; y1 = fy + 0.4;
+			}
+			net.minecraft.util.math.Box probe =
+					new net.minecraft.util.math.Box(x0, y0, z0, x1, y1, z1);
+			for (BlockPos q : new BlockPos[]{a, b}) {
+				net.minecraft.util.shape.VoxelShape sh = world.getBlockState(q).getCollisionShape(world, q);
+				if (sh.isEmpty()) {
+					continue;
+				}
+				for (net.minecraft.util.math.Box bb : sh.getBoundingBoxes()) {
+					if (bb.offset(q).intersects(probe)) {
+						return false;
+					}
+				}
+			}
+			return true;
+		} catch (Throwable t2) {
+			return false;
+		}
 	}
 
 	private static boolean directionEnabled() {
