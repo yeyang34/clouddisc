@@ -537,7 +537,10 @@ public final class Acoustics {
 				if (st.smoothOcc < 0.0f || dt <= 0L || dt > 100L) {
 					st.smoothOcc = (float) occ;
 				} else {
-					float kk = (float) (1.0 - Math.exp(-dt / 8.0));
+					// 【0.12.72】非对称平滑：由"清楚→闷"（关门/走进隔间）用 1.1 秒慢慢沉下去，
+					// 由"闷→清楚"（开门/走出）用 0.6 秒 —— 同一曲线会在关门瞬间"啪"地跳变（实测突兀）。
+					double tau = ((float) occ > st.smoothOcc) ? 22.0 : 12.0;
+					float kk = (float) (1.0 - Math.exp(-dt / tau));
 					st.smoothOcc += ((float) occ - st.smoothOcc) * kk;
 				}
 				st.smoothOccTick = nowTick;
