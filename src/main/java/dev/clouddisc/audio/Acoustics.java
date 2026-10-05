@@ -501,15 +501,13 @@ public final class Acoustics {
 			//   整堵墙 / 封闭小屋 → 挡住全部射线（占比 1.0）→ 完整物理 ✓
 			// （0.12.27 那版是"1 - 占比"直接线性，太狠；0.12.32 的空间闸门又会把露天一堵墙清零 ✗）
 			// 【0.12.54】采用"最通畅那条路"的遮挡：门开着 / 有小缝 → 声音从那里过去 ✓
-			if (bestOffset < occMain) {
-				occMain = bestOffset;
-			}
+
 			double fracBlocked = 1.0 - (openPaths / 8.0);
 			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
 			// 【0.12.65】"声路"覆盖：若存在一条可走过去的路线（半径内 BFS 可达），
 			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
 			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
-			int pathLen = pathLengthTo(world, jukebox, ear);
+			int pathLen = roomPathLength(world, jukebox, ear); // 【0.12.69】Valve 式：房间连通域路径
 			if (pathLen > 0 && pathLen <= center.distanceTo(ear) * 2.5) {
 				double straight = Math.max(0.5, center.distanceTo(ear));
 				double detour = Math.max(0.0, pathLen / straight - 1.0);
@@ -1426,6 +1424,76 @@ public final class Acoustics {
 		} catch (Throwable t) {
 			return false;
 		}
+	}
+
+	/**
+	 * 【0.12.69】Valve 式「房间 + 传送门」声路（Portal 2 的做法）：
+	 * 从声源与听者分别对【空气】做一次有界洪泛（flood fill）——即"声波能在哪些空气体积里自由传播"。
+	 * <ul>
+	 *   <li>两个连通域【相通】→ 它们之间存在开口（门/走廊/窗）= 传送门 ✓
+	 *       路径长度 = 两次洪泛距离之和（相遇格）→ 用它算绕行比，做轻微/中等衰减 ✓</li>
+	 *   <li>两个连通域【不相通】→ 中间是真墙（空气过不去）→ 由材质遮挡决定（明显闷）✓</li>
+	 * </ul>
+	 * 关键优势：洪泛是在【整个空气体积】里铺开的，所以房间里的柱子、家具、台阶【完全不影响】它 ✓✓
+	 * （这正是"躲在柱子后面不该闷"的物理含义）；而墙/关闭的门把空气体积切断 ✓ → 自然明显闷 ✓。
+	 *
+	 * @return 房间内路径格数；-1 表示两者空气不相通（只能穿墙）
+	 */
+	private static int roomPathLength(World world, BlockPos from, Vec3d ear) {
+		try {
+			BlockPos to = BlockPos.ofFloored(ear.x, ear.y, ear.z);
+			int ddx = from.getX() - to.getX();
+			int ddy = from.getY() - to.getY();
+			int ddz = from.getZ() - to.getZ();
+			if (ddx * ddx + ddy * ddy + ddz * ddz > 48 * 48) {
+				return -1;
+			}
+			java.util.HashMap<BlockPos, Integer> a = floodAir(world, from, 2200);
+			java.util.HashMap<BlockPos, Integer> b = floodAir(world, to, 2200);
+			int best = Integer.MAX_VALUE;
+			for (java.util.Map.Entry<BlockPos, Integer> e : a.entrySet()) {
+				Integer other = b.get(e.getKey());
+				if (other != null) {
+					int sum = e.getValue() + other;
+					if (sum < best) {
+						best = sum;
+					}
+				}
+			}
+			return best == Integer.MAX_VALUE ? -1 : best;
+		} catch (Throwable t) {
+			return -1;
+		}
+	}
+
+	/** 在空气里做有界 BFS，返回"格 → 距起点步数"。 */
+	private static java.util.HashMap<BlockPos, Integer> floodAir(World world, BlockPos start, int cap) {
+		java.util.HashMap<BlockPos, Integer> dist = new java.util.HashMap<>();
+		java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
+		dist.put(start, 0);
+		queue.add(start);
+		final int[] DX = {1, -1, 0, 0, 0, 0};
+		final int[] DY = {0, 0, 1, -1, 0, 0};
+		final int[] DZ = {0, 0, 0, 0, 1, -1};
+		while (!queue.isEmpty() && dist.size() < cap) {
+			BlockPos p = queue.poll();
+			int d = dist.get(p);
+			if (d >= 32) {
+				continue;
+			}
+			for (int i = 0; i < 6; i++) {
+				BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+				if (dist.containsKey(n)) {
+					continue;
+				}
+				if (!freeAt(world, n)) {
+					continue; // 空气才连通；墙/关着的门切断体积 ✓
+				}
+				dist.put(n, d + 1);
+				queue.add(n);
+			}
+		}
+		return dist;
 	}
 
 	private static boolean directionEnabled() {
