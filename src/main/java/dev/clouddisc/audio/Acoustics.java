@@ -590,13 +590,13 @@ public final class Acoustics {
 		int edgePaths = edgePathsTo(world, ear, center, jukebox);
 		if (edgePaths > 0) {
 			// 绕射比镜面反射多损失一些能量（Maekawa 低频渐近约 5 dB），所以封顶比 0.25 松一点
-			occ = Math.min(occ, 0.45);
+			occ = Math.min(occ, occMain * 0.45); // 【0.13.8】按比例
 		}
 		if (rr.earReach > 0 || backPaths > 0) {
 			// 【0.12.59】关键修正：声音是【绕过去/反射过去】的，直线路径上那堵墙根本不该算进去 ✗。
 			// 之前用 occ *= 0.15 缩放：当直线遮挡累积到 2~3 时，剩 0.3~0.45 → 高频仍被削 -17 dB ✗
 			// （实测"躲在石柱后还是那个吊样"）。改成【绝对封顶】：
-			occ = Math.min(occ, 0.25);
+			occ = Math.min(occ, occMain * 0.25); // 【0.13.8】按比例（几乎总会触发，是没有闷的主因）
 		}
 
 		float avgShared = rr.sharedAirspaceWeight;
