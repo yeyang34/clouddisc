@@ -459,7 +459,11 @@ public final class Acoustics {
 			for (int sx = -1; sx <= 1; sx += 2) {
 				for (int sy = -1; sy <= 1; sy += 2) {
 					for (int sz = -1; sz <= 1; sz += 2) {
-						Vec3d off = new Vec3d(sx, sy, sz);
+						// 【0.12.62】偏移改为垂直于"听者→声源"的平面内采样：原来用三维 (±1,±1,±1)，
+						// 其中带 y=−1 的射线会钻进地面/台阶，被算成"被挡" → 被挡占比虚高到 8/8
+						// → 一根八竿子打不着的柱子就能让遮挡吃满 1.0（实测日志：通透通路=0/8、GAINHF=0.017）。
+						// 我们要采样的是"声束的横截面"，所以偏移必须在垂直平面内。
+						Vec3d off = perpendicularOffset(center, ear, sx, sy, sz);
 						double o = occlusionAt(world, center.add(off), ear.add(off), jukebox);
 						if (o < bestOffset) {
 							bestOffset = o;
@@ -1277,6 +1281,29 @@ public final class Acoustics {
 			return 0;
 		}
 		return hits;
+	}
+
+	/** 【0.12.62】把 (sx,sy,sz)∈{±1}³ 映射成"垂直于 听者→声源 轴"的平面内 8 个方向之一（半径 1 格）。 */
+	private static Vec3d perpendicularOffset(Vec3d center, Vec3d ear, int sx, int sy, int sz) {
+		try {
+			Vec3d axis = ear.subtract(center);
+			if (axis.lengthSquared() < 1.0e-9) {
+				return new Vec3d(sx, sy, sz);
+			}
+			axis = axis.normalize();
+			Vec3d ref = Math.abs(axis.y) < 0.9 ? new Vec3d(0.0, 1.0, 0.0) : new Vec3d(1.0, 0.0, 0.0);
+			Vec3d u = axis.crossProduct(ref);
+			if (u.lengthSquared() < 1.0e-9) {
+				return new Vec3d(sx, sy, sz);
+			}
+			u = u.normalize();
+			Vec3d v = axis.crossProduct(u).normalize();
+			int idx = ((sx > 0 ? 1 : 0) << 2) | ((sy > 0 ? 1 : 0) << 1) | (sz > 0 ? 1 : 0);
+			double ang = idx * (Math.PI / 4.0);
+			return u.multiply(Math.cos(ang)).add(v.multiply(Math.sin(ang)));
+		} catch (Throwable t) {
+			return new Vec3d(sx, sy, sz);
+		}
 	}
 
 	private static boolean directionEnabled() {
