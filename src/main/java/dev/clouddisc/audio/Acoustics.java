@@ -1373,8 +1373,8 @@ public final class Acoustics {
 					} catch (Throwable e) {
 						continue;
 					}
-					if (!bs.getCollisionShape(world, n).isEmpty()) {
-						continue; // 不可通行（关着的门、墙、地面都算）
+					if (!walkableCell(world, n)) {
+						continue; // 严格"能走过去"：净空 + 支撑（只能上 1 格）；不能从墙头上方绕
 					}
 					dist.put(n, d + 1);
 					queue.add(n);
@@ -1384,6 +1384,41 @@ public final class Acoustics {
 			return -1;
 		}
 		return -1;
+	}
+
+	/** 该格是否为"空气/可穿过"（无碰撞体积）。 */
+	private static boolean freeAt(World world, BlockPos p) {
+		try {
+			return world.getBlockState(p).getCollisionShape(world, p).isEmpty();
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	/** 该格是否为实心（有碰撞体积）。 */
+	private static boolean solidAt(World world, BlockPos p) {
+		return !freeAt(world, p);
+	}
+
+	/**
+	 * 【0.12.67】"声音能走过去吗"的严格判定（业界用导航网格，我们用它近似）：
+	 * 1) 本格与头顶一格都必须无碰撞（有净空）；2) 下方必须有支撑，或再下一格有支撑（= 上 1 格台阶）。
+	 * 这样"从墙头上方/屋顶上方的空气绕过去"就不成立（上一版正因为把空气当可通行，
+	 * 门开与门关都能绕，导致完全不闷）。副作用符合现实：1 格矮墙能跨（轻微衰减）、2 格以上跨不过（明显闷）。
+	 */
+	private static boolean walkableCell(World world, BlockPos n) {
+		try {
+			if (!freeAt(world, n) || !freeAt(world, n.up())) {
+				return false;
+			}
+			BlockPos below = n.down();
+			if (solidAt(world, below)) {
+				return true;
+			}
+			return solidAt(world, below.down());
+		} catch (Throwable t) {
+			return false;
+		}
 	}
 
 	private static boolean directionEnabled() {
