@@ -531,7 +531,9 @@ public final class Acoustics {
 		// 【0.12.55】反射通路优先：只要有一条反弹射线能"暴露到听者所在空间"（360° 无死角），
 		// 就说明声音能绕过障碍从间接路径到达 —— 现实里硬表面反射几乎不损失能量（0.04~0.2 dB），
 		// 所以这时不该被判成"密闭般闷"。幅度先取 0.15（保留一点空间感），后续可按实测再调。
-		if (rr.earReach > 0) {
+		// 【0.12.60】互易搜索：从听者出发找"能走到唱片机"的路径（用户思路：用自己的射线接住它）
+		int backPaths = listenerPathsTo(world, ear, center, jukebox);
+		if (rr.earReach > 0 || backPaths > 0) {
 			// 【0.12.59】关键修正：声音是【绕过去/反射过去】的，直线路径上那堵墙根本不该算进去 ✗。
 			// 之前用 occ *= 0.15 缩放：当直线遮挡累积到 2~3 时，剩 0.3~0.45 → 高频仍被削 -17 dB ✗
 			// （实测"躲在石柱后还是那个吊样"）。改成【绝对封顶】：
@@ -1169,6 +1171,62 @@ public final class Acoustics {
 		} catch (Throwable t) {
 			return null;
 		}
+	}
+
+	/**
+	 * 【0.12.60】互易（双向）路径搜索：从【听者】向四周发射黄金角射线，各反弹 3 次，
+	 * 看是否存在一条"能到达唱片机"的路径。物理依据：声传播互易 ——
+	 * 从听者出发能走到声源的路径，等价于声源到听者的传播路径。
+	 *
+	 * <p>为什么必须从听者发射：从声源发射的 32 条金角射线方向均匀，很难恰好对准一扇门
+	 * （实测"声音出不了屋子"），而在屋里反复反弹又永远碰不到听者；
+	 * 从听者出发只需对准自己所在空间/走廊的出口，命中率高得多。
+	 *
+	 * @return 命中的路径条数（≥1 即认为存在通路）
+	 */
+	private static int listenerPathsTo(World world, Vec3d ear, Vec3d center, BlockPos jukebox) {
+		int hits = 0;
+		int rays = Math.max(16, Math.min(64, rays()));
+		for (int i = 0; i < rays; i++) {
+			double yy = 1.0 - 2.0 * (i + 0.5) / rays;
+			double rr = Math.sqrt(Math.max(0.0, 1.0 - yy * yy));
+			double th = GOLDEN_ANGLE * i;
+			Vec3d dir = new Vec3d(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
+			Vec3d origin = ear;
+			for (int b = 0; b < 3; b++) {
+				Vec3d end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
+				RayWalk.Hit hit;
+				try {
+					hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
+				} catch (Throwable t2) {
+					break;
+				}
+				Vec3d segEnd = hit == null ? end : hit.point();
+				// 这一段是否"到达唱片机"：直接命中唱片机方块，或从它 1.5 格内掠过且直线通畅
+				if (hit != null && hit.pos.equals(jukebox)) {
+					hits++;
+					break;
+				}
+				Vec3d near = closestPointOnSegment(origin, segEnd, center);
+				if (near != null && near.squaredDistanceTo(center) <= 2.25) {
+					if (RayWalk.cast(world, near, center, 24) == null) {
+						hits++;
+						break;
+					}
+				}
+				if (hit == null) {
+					break;
+				}
+				// 镜面反射（dir - 2(dir·n)n），与追踪器同一公式
+				double d = dir.dotProduct(hit.normal()) * 2.0;
+				dir = dir.subtract(hit.normal().multiply(d)).normalize();
+				origin = hit.point().add(hit.normal().multiply(0.002));
+			}
+			if (hits >= 3) {
+				break; // 够用了，省开销
+			}
+		}
+		return hits;
 	}
 
 	private static boolean directionEnabled() {
