@@ -70,7 +70,7 @@ public final class CloudDiscConfig {
 	 *   <li>{@code 3.0+} → 明显压缩，音质有损</li>
 	 * </ul>
 	 */
-	public float jukeboxVolume = 1.0f;
+	public float jukeboxVolume = 0.7f;
 
 	// ---- 缓存与网络 ----
 	/**
