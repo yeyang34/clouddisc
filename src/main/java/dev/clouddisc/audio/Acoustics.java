@@ -109,7 +109,7 @@ public final class Acoustics {
 	 * 所以这里给得比最大听距更宽松，避免"远处的墙没算进来"这种静默错误。 */
 	private static final int MAX_OCC_STEPS = 96;
 	/** 遮挡累积值上限：再厚的墙也不会更闷（否则一个 10 格厚的地基会把增益压到听不见）。 */
-	private static final double MAX_OCC = 0.9;
+	private static final double MAX_OCC = 3.0;
 	/** 诊断日志间隔（tick）：200 刻 = 10 秒。 */
 	private static final long LOG_INTERVAL_TICKS = 200L;
 	/** 材质探针：每轮评估最多打几条。 */
