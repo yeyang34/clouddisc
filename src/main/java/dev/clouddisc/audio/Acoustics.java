@@ -473,7 +473,13 @@ public final class Acoustics {
 						Vec3d offTo = ear.add(off);
 						Vec3d offDir = offTo.subtract(offFrom);
 						double offLen = offDir.length();
-						Vec3d offStart = offLen > 1.6 ? offFrom.add(offDir.multiply(1.5 / offLen)) : offFrom;
+						// 【0.12.75】只有起点【确实落在实心方块里】才沿射线前移；否则保持原位。
+						// 原来无条件前移 1.5 格 —— 站在唱片机正上方时垂直偏移射线的起点被抬到屋顶之上，
+						// 屋顶完全不被计入 → 被挡占比 0 → occ = 0（实测："正上方房顶是透的，远一点就挡"）。
+						Vec3d offStart = offFrom;
+						if (offLen > 1.6 && !freeAt(world, BlockPos.ofFloored(offFrom.x, offFrom.y, offFrom.z))) {
+							offStart = offFrom.add(offDir.multiply(1.5 / offLen));
+						}
 						double o = occlusionAt(world, offStart, offTo, jukebox);
 						if (o < bestOffset) {
 							bestOffset = o;
