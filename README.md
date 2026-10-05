@@ -18,19 +18,33 @@
 | `clouddisc-x.y.z.jar` | 主 mod（必需） |
 | `clouddisc-jukeboxlib-*.jar` | 可选：解除唱片时长限制，想放整首歌就装它 |
 
+## 特色
+
+**🎵 唱片机本体发声**
+不是外挂播放器。用的是原版唱片机那一套：放进唱片机、右键播放、音源就挂在唱片机上，
+音量走「唱片机」那条、关掉音乐照样按你的设置来。
+
+**👥 多人同步，各听各的也听同一首**
+装了这个 mod 的人会自动互相同步：谁先放，其他人跟着听；进度对齐、切歌一致。
+各自用各自的解析服务，不需要服务器装任何东西。
+
+**🏠 物理声效：声音会绕、会闷、会从门里出来**
+- 隔一堵墙 → 明显变闷（低频照样传过来，所以是"闷"不是"小"）
+- **门开着 → 声音从门里出来**；门关着 → 明显变闷
+- 房间里的**柱子、箱子、家具、台阶不挡声**（声音会绕过去）
+- 屋顶、半砖、楼梯、玻璃按**真实几何**判定
+- 声音变化有过渡：变闷约 1 秒、变清楚约 1 秒，不会"啪"地跳
+- 开阔地带和洞穴的**余响更饱满**
+
+**🔒 纯客户端、不掉原版体验**
+服务器不用装、原版唱片照样能放；没装 mod 的人听到的就是普通唱片机。
+
 ## 一分钟上手
 
 1. 装好 **Fabric Loader + Fabric API**，把 jar 丢进 `mods`
 2. 拿 **铁砧**把任意唱片改名成 `@<网易云歌曲ID>`（例如 `@186016`）
 3. 把唱片放进**唱片机**，右键
 4. 想放 VIP / 独家歌：按 `K` → 「网络与音源」→ 填自己的解析服务地址 → 保存
-
-## 特性
-
-- **唱片机本体发声** —— 接口、时长、切歌全部走原版唱片机那套
-- **多人同步** —— 装了这个 mod 的人听到同一进度
-- **物理声效** —— 隔墙变闷、开门听得到、房间里的柱子/家具不挡声、屋顶和墙按真实几何算
-- **不依赖服务器** —— 纯客户端，各自解析、彼此同步
 
 ## 常见问题
 
@@ -54,12 +68,18 @@
 ## 作者合影
 
 <p align="center">
-  <img src="docs/images/skin-head-plain.png" width="96" alt="作者">
-  <img src="docs/images/skin-ayanami.png" width="96" alt="Ayanami005">
-  <img src="docs/images/agent-fish.jpg" width="96" alt="助理">
+  <img src="docs/images/skin-head-plain.png" width="110" alt="作者">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/images/skin-ayanami.png" width="110" alt="Ayanami005">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/images/agent-fish.jpg" width="110" alt="那条鱼">
 </p>
 
-<p align="center"><sub>作者 · Ayanami005（提供 AI token） · 那条鱼</sub></p>
+<p align="center">
+  <b>_wanpi_</b> · 作者 &nbsp;|&nbsp;
+  <b>Ayanami005</b> · 提供 AI token &nbsp;|&nbsp;
+  <b>那条鱼</b> · 助理
+</p>
 
 ## 许可
 
