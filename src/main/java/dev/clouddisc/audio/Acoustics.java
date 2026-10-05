@@ -464,7 +464,17 @@ public final class Acoustics {
 						// → 一根八竿子打不着的柱子就能让遮挡吃满 1.0（实测日志：通透通路=0/8、GAINHF=0.017）。
 						// 我们要采样的是"声束的横截面"，所以偏移必须在垂直平面内。
 						Vec3d off = perpendicularOffset(center, ear, sx, sy, sz);
-						double o = occlusionAt(world, center.add(off), ear.add(off), jukebox);
+						// 【0.12.64】关键修复：偏移射线的起点可能落在【地面/地板】等实心方块内部
+						//（垂直平面内的偏移有朝下/朝上的方向）→ occlusionAt 从方块内部起步，
+						// 第一格立刻 +1.0 → 这几条永远算"被挡" → 被挡占比虚高到 8/8
+						// → 一根柱子、甚至只挡上一块方块就让遮挡吃满 1.0（实测"拆了柱子还是全闷"）。
+						// 物理上：紧贴声源的底座/地面不在"你我之间"，不该算遮挡 → 起点沿射线前进 1.5 格。
+						Vec3d offFrom = center.add(off);
+						Vec3d offTo = ear.add(off);
+						Vec3d offDir = offTo.subtract(offFrom);
+						double offLen = offDir.length();
+						Vec3d offStart = offLen > 1.6 ? offFrom.add(offDir.multiply(1.5 / offLen)) : offFrom;
+						double o = occlusionAt(world, offStart, offTo, jukebox);
 						if (o < bestOffset) {
 							bestOffset = o;
 						}
