@@ -508,11 +508,17 @@ public final class Acoustics {
 			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
 			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
 			int pathLen = roomPathLength(world, jukebox, ear); // 【0.12.69】Valve 式：房间连通域路径
-			if (pathLen > 0 && pathLen <= center.distanceTo(ear) * 2.5) {
+			if (pathLen > 0) {
 				double straight = Math.max(0.5, center.distanceTo(ear));
 				double detour = Math.max(0.0, pathLen / straight - 1.0);
-				double f = Math.max(0.05, 1.0 / (1.0 + 10.0 * detour));
-				occ = Math.min(occ, occMain * f);
+				// 【0.12.70】Valve 语义：一旦空气连通（有开口），就【完全按房间路径】决定衰减，
+				// 不再把"直线上的方块"那一刀算进来（之前用封顶，一根柱子仍会 -10 dB，反直觉）。
+				// 加法映射：绕行比每多 1 倍距离 → 遮挡 +0.35。
+				//   一根 1 格方块（绕 2 格 / 7 格，detour≈0.29）→ occ≈0.12 → 高频仅 -5 dB（几乎听不出）
+				//   绕房子半圈（detour≈2）→ occ≈0.72 → 明显闷
+				double f = 0.02 + 0.35 * detour;
+				// 用房间路径结果【替换】（而非在材质遮挡上封顶）：这是 Valve 模型的核心
+				occ = Math.min(occ, f);
 			}
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
 			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
