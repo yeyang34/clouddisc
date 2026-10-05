@@ -545,7 +545,7 @@ public final class Acoustics {
 				} else {
 					// 【0.12.72】非对称平滑：由"清楚→闷"（关门/走进隔间）用 1.1 秒慢慢沉下去，
 					// 由"闷→清楚"（开门/走出）用 0.6 秒 —— 同一曲线会在关门瞬间"啪"地跳变（实测突兀）。
-					double tau = ((float) occ > st.smoothOcc) ? 22.0 : 12.0;
+					double tau = ((float) occ > st.smoothOcc) ? 22.0 : 20.0; // 【0.12.77】变清楚也从 0.6s 放到 1.0s（突然暴露时音量跳变）
 					float kk = (float) (1.0 - Math.exp(-dt / tau));
 					st.smoothOcc += ((float) occ - st.smoothOcc) * kk;
 				}
