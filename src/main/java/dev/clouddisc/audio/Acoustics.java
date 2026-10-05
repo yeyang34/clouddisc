@@ -1256,17 +1256,19 @@ public final class Acoustics {
 				return 1; // 直线本来就通
 			}
 			BlockPos bp = h.pos;
-			Vec3d bc = new Vec3d(bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5);
-			for (int dx = 0; dx <= 1; dx++) {
-				for (int dy = 0; dy <= 1; dy++) {
-					for (int dz = 0; dz <= 1; dz++) {
-						Vec3d corner = new Vec3d(bp.getX() + dx, bp.getY() + dy, bp.getZ() + dz);
-						Vec3d dirOut = corner.subtract(bc);
-						if (dirOut.lengthSquared() < 1.0e-6) {
+			// 【0.12.63】在"第一个挡路点"周围半径 2 格的球面采样：
+			// 原来只查那一个方块的 8 个角 —— 若射线是穿【墙】而过，8 个角全在墙体内部，
+			// 两段都不通 → 找不到就在旁边一两格的【门/窗/缝隙】（实测"门开着但在屋外听还是闷"）。
+			for (int dx = -2; dx <= 2; dx++) {
+				for (int dy = -2; dy <= 2; dy++) {
+					for (int dz = -2; dz <= 2; dz++) {
+						if (dx == 0 && dy == 0 && dz == 0) {
 							continue;
 						}
-						// 稍微往外推一点，避免射线起点正好贴在方块面上
-						Vec3d p = corner.add(dirOut.normalize().multiply(0.06));
+						if (dx * dx + dy * dy + dz * dz > 6) {
+							continue; // 只取半径 ~2.4 格内的点，控制开销
+						}
+						Vec3d p = new Vec3d(bp.getX() + 0.5 + dx, bp.getY() + 0.5 + dy, bp.getZ() + 0.5 + dz);
 						if (RayWalk.cast(world, ear, p, MAX_REVERB_STEPS) == null
 								&& RayWalk.cast(world, p, center, MAX_REVERB_STEPS) == null) {
 							hits++;
