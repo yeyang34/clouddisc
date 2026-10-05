@@ -448,6 +448,8 @@ public final class Acoustics {
 
 		double occMain = occlusionAt(world, center, ear, jukebox);
 		int openPaths = 0;
+			// 【0.12.54】9 条射线里最小遮挡（绕射：走最好走的那条路）
+			double bestOffset = Double.MAX_VALUE;
 		double occ = occMain;
 		if (!strictOcclusion() && occMain > 0.0) {
 			// 只要主射线被挡就试 8 个对角偏移；主射线本来就通透时遮挡必然是 0，不用白算。
@@ -457,6 +459,9 @@ public final class Acoustics {
 					for (int sz = -1; sz <= 1; sz += 2) {
 						Vec3d off = new Vec3d(sx, sy, sz);
 						double o = occlusionAt(world, center.add(off), ear.add(off), jukebox);
+						if (o < bestOffset) {
+							bestOffset = o;
+						}
 						if (o <= OPEN_PATH_OCC) {
 							openPaths++;
 						}
@@ -479,6 +484,10 @@ public final class Acoustics {
 			//   一格方块 / 树干  → 只挡住少数射线（占比 ~0.1）→ 0.1^1.5≈0.03 → 几乎不闷 ✓
 			//   整堵墙 / 封闭小屋 → 挡住全部射线（占比 1.0）→ 完整物理 ✓
 			// （0.12.27 那版是"1 - 占比"直接线性，太狠；0.12.32 的空间闸门又会把露天一堵墙清零 ✗）
+			// 【0.12.54】采用"最通畅那条路"的遮挡：门开着 / 有小缝 → 声音从那里过去 ✓
+			if (bestOffset < occMain) {
+				occMain = bestOffset;
+			}
 			double fracBlocked = 1.0 - (openPaths / 8.0);
 			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
