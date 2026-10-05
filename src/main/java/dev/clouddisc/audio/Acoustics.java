@@ -506,6 +506,16 @@ public final class Acoustics {
 			}
 			double fracBlocked = 1.0 - (openPaths / 8.0);
 			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
+			// 【0.12.65】"声路"覆盖：若存在一条可走过去的路线（半径内 BFS 可达），
+			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
+			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
+			int pathLen = pathLengthTo(world, jukebox, ear);
+			if (pathLen > 0) {
+				double straight = Math.max(0.5, center.distanceTo(ear));
+				double detour = Math.max(0.0, pathLen / straight - 1.0);
+				double f = Math.max(0.05, 1.0 / (1.0 + 10.0 * detour));
+				occ = Math.min(occ, occMain * f);
+			}
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
 			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
 			//   · 双方都在开阔空间 → 遮挡 ×0.15（树后几乎不闷）
@@ -1316,6 +1326,64 @@ public final class Acoustics {
 		} catch (Throwable t) {
 			return new Vec3d(sx, sy, sz);
 		}
+	}
+
+	/**
+	 * 【0.12.65】Steam-Audio 式「声路」寻路：在【可通行方块】（空气/水/开着的门/植物…）上做 BFS，
+	 * 返回从唱片机到听者的最短步数（格）。返回 -1 表示半径内不可达（= 只能穿墙）。
+	 *
+	 * <p>业界依据：Valve 的 Portal 2 用"房间/传送门图"、Steam Audio 用"导航网格寻路"——
+	 * 都是问"有没有一条【能走过去的路线】"，而不是"直线上有没有方块"。
+	 * 这样才能做到：一根柱子（绕 2 格）几乎不影响 ✓；关着的门（无路）明显闷 ✓。
+	 */
+	private static int pathLengthTo(World world, BlockPos from, Vec3d ear) {
+		try {
+			BlockPos to = BlockPos.ofFloored(ear.x, ear.y, ear.z);
+			int ddx = from.getX() - to.getX();
+			int ddy = from.getY() - to.getY();
+			int ddz = from.getZ() - to.getZ();
+			if (ddx * ddx + ddy * ddy + ddz * ddz > 64 * 64) {
+				return -1; // 太远不做寻路
+			}
+			java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
+			java.util.HashMap<BlockPos, Integer> dist = new java.util.HashMap<>();
+			queue.add(from);
+			dist.put(from, 0);
+			final int[] DX = {1, -1, 0, 0, 0, 0};
+			final int[] DY = {0, 0, 1, -1, 0, 0};
+			final int[] DZ = {0, 0, 0, 0, 1, -1};
+			int cap = 9000;
+			while (!queue.isEmpty() && dist.size() < cap) {
+				BlockPos p = queue.poll();
+				int d = dist.get(p);
+				if (p.equals(to)) {
+					return d;
+				}
+				if (d >= 48) {
+					continue;
+				}
+				for (int i = 0; i < 6; i++) {
+					BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+					if (dist.containsKey(n)) {
+						continue;
+					}
+					BlockState bs;
+					try {
+						bs = world.getBlockState(n);
+					} catch (Throwable e) {
+						continue;
+					}
+					if (!bs.getCollisionShape(world, n).isEmpty()) {
+						continue; // 不可通行（关着的门、墙、地面都算）
+					}
+					dist.put(n, d + 1);
+					queue.add(n);
+				}
+			}
+		} catch (Throwable t) {
+			return -1;
+		}
+		return -1;
 	}
 
 	private static boolean directionEnabled() {
