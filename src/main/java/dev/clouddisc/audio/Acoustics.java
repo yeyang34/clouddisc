@@ -92,6 +92,10 @@ public final class Acoustics {
 	 */
 	private static final float OPENNESS_GATE_OCC = 0.6f;
 	/** 偏移射线算作"一条通透通路"的遮挡阈值：≤ 它就认为这条线是通的。 */
+	/** 【0.13.6】洪泛允许的高度带（双方高度 ±1）：门/走廊都在同一层，翻屋顶/绕墙外不算路。 */
+	private static int bandLo = Integer.MIN_VALUE;
+	private static int bandHi = Integer.MAX_VALUE;
+
 	private static final double OPEN_PATH_OCC = 0.35;
 	/**
 	 * 放宽幅度上限：最多把遮挡降到 {@code 1 - MAX_RELAX} = 15%。
@@ -1480,6 +1484,9 @@ public final class Acoustics {
 			if (ddx * ddx + ddy * ddy + ddz * ddz > 48 * 48) {
 				return -1;
 			}
+			// 【0.13.6】只在双方高度 ±1 格内连通（否则洪泛从屋顶上方/墙外绕过，闷声被整体封顶掉）。
+			bandLo = Math.min(from.getY(), to.getY()) - 1;
+			bandHi = Math.max(from.getY(), to.getY()) + 1;
 			java.util.HashMap<BlockPos, Integer> a = floodAir(world, from, 2200);
 			java.util.HashMap<BlockPos, Integer> b = floodAir(world, to, 2200);
 			int best = Integer.MAX_VALUE;
@@ -1517,6 +1524,9 @@ public final class Acoustics {
 				BlockPos n = p.add(DX[i], DY[i], DZ[i]);
 				if (dist.containsKey(n)) {
 					continue;
+				}
+				if (n.getY() < bandLo || n.getY() > bandHi) {
+					continue; // 【0.13.6】不许翻屋顶 / 绕墙外
 				}
 				if (Math.abs(n.getY() - p.getY()) > 1 || !canStandAt(world, n)) {
 					continue; // 空气才连通；墙/关着的门切断体积 ✓
