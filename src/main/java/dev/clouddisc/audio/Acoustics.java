@@ -110,6 +110,8 @@ public final class Acoustics {
 	private static final int MAX_OCC_STEPS = 96;
 	/** 遮挡累积值上限：再厚的墙也不会更闷（否则一个 10 格厚的地基会把增益压到听不见）。 */
 	private static final double MAX_OCC = 3.0;
+	/** 【0.12.56】接收球半径（格）：射线从听者这个距离内掠过，就算"能听到"。 */
+	private static final double EAR_REACH = 2.0;
 	/** 诊断日志间隔（tick）：200 刻 = 10 秒。 */
 	private static final long LOG_INTERVAL_TICKS = 200L;
 	/** 材质探针：每轮评估最多打几条。 */
@@ -762,6 +764,23 @@ public final class Acoustics {
 			for (int b = 0; b < REVERB_BOUNCES; b++) {
 				Vec3d end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
+
+				// 【0.12.56】接收球判定（房间声学标准做法，用户提出的思路）：
+				// 射线不必碰到听者、也不必从反射点直视听者 —— 只要它【从听者附近掠过】，
+				// 听者就能"用自己的射线接住它"（= 从听者连一条短线到射线的最近点）。
+				// 物理依据：声音是压力场，决定听到与否的是"有无传播路径经过听者附近"，
+				// 而不是"能否看见音源"。反射只是延长路径的一种方式，与直达段同等对待。
+				{
+					Vec3d segEnd = hit == null ? end : hit.point();
+					Vec3d near = closestPointOnSegment(origin, segEnd, ear);
+					if (near != null && near.squaredDistanceTo(ear) <= EAR_REACH * EAR_REACH) {
+						// 听者的"捕获射线"也要通（最近点到耳朵之间没有实体），
+						// 否则贴着墙站在墙外、射线在墙内掠过会被误判为听到了。
+						if (RayWalk.cast(world, near.add(ear.subtract(near).normalize().multiply(0.02)), ear, 24) == null) {
+							out.earReach++;
+						}
+					}
+				}
 				if (hit == null) {
 					// 这条射线跑到头了（等于跑进了开阔空间）：把"到听者的剩余距离"也算进路程
 					totalDist += origin.distanceTo(ear);
@@ -1129,6 +1148,22 @@ public final class Acoustics {
 			return 1.0f; // 声源被封住（小屋/矿洞）→ 走完整物理，门开/门关照旧
 		} catch (Throwable t) {
 			return 1.0f;
+		}
+	}
+
+	/** 线段 ab 上离点 p 最近的点（clamp 投影参数 t∈[0,1]）。 */
+	private static Vec3d closestPointOnSegment(Vec3d a, Vec3d b, Vec3d p) {
+		try {
+			Vec3d ab = b.subtract(a);
+			double len2 = ab.lengthSquared();
+			if (len2 < 1.0e-9) {
+				return a;
+			}
+			double t = p.subtract(a).dotProduct(ab) / len2;
+			t = Math.max(0.0, Math.min(1.0, t));
+			return a.add(ab.multiply(t));
+		} catch (Throwable t) {
+			return null;
 		}
 	}
 
