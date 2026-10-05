@@ -1518,7 +1518,7 @@ public final class Acoustics {
 				if (dist.containsKey(n)) {
 					continue;
 				}
-				if (!canPass(world, p, n)) {
+				if (Math.abs(n.getY() - p.getY()) > 1 || !canStandAt(world, n)) {
 					continue; // 空气才连通；墙/关着的门切断体积 ✓
 				}
 				dist.put(n, d + 1);
@@ -1577,6 +1577,36 @@ public final class Acoustics {
 			}
 			return true;
 		} catch (Throwable t2) {
+			return false;
+		}
+	}
+
+	/**
+	 * 【0.13.5】这一格"玩家能不能站进去" —— 直接问 Minecraft 自己的碰撞系统，
+	 * 而不是我们推断门的几何（试过 shape.isEmpty / open 属性 / 薄盒，都各有漏洞）。
+	 *
+	 * <p>做法：把玩家体积盒（宽 0.6、高 1.8）放到该格，让 World 回答能否放得下。
+	 * 这样门开/门关、朝向、铁门、活板门、栅栏门、楼梯、半砖、mod 方块……全部自动正确：
+	 * <ul>
+	 *   <li>门开着 → 门扇贴在侧面，盒子放得下 → 通 ✓</li>
+	 *   <li>门关着 → 门扇横在中间，盒子放不下 → 挡 ✓</li>
+	 *   <li>1.8 的高度自动要求净空（不需要额外判头顶）✓</li>
+	 * </ul>
+	 * 等价于 Steam Audio 的导航网格：洪泛出来的就是"玩家实际能到达的空间"。
+	 */
+	private static boolean canStandAt(World world, BlockPos pos) {
+		try {
+			net.minecraft.util.math.Box box = new net.minecraft.util.math.Box(
+					pos.getX() + 0.2, pos.getY(), pos.getZ() + 0.2,
+					pos.getX() + 0.8, pos.getY() + 1.8, pos.getZ() + 0.8);
+			net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+			net.minecraft.entity.Entity self = mc == null ? null : mc.player;
+			if (self != null) {
+				return world.isSpaceEmpty(self, box);
+			}
+			// 极端情况（还没进世界）：退化成"该格无碰撞体积"
+			return world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
+		} catch (Throwable t) {
 			return false;
 		}
 	}
