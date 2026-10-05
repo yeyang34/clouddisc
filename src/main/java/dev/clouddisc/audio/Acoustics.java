@@ -157,6 +157,9 @@ public final class Acoustics {
 		float occlusionAcc;
 		/** 0.12.6 诊断：主射线之外的 8 条偏移射线里，有几条"通透"（≤ {@link #OPEN_PATH_OCC}）。 */
 		int lastOpenPaths;
+		/** 【0.13.1】诊断：房间路径格数（-1=不相通）与最终系数 f。 */
+		int lastPathLen = -2;
+		float lastPathF = -1.0f;
 		/** 0.12.6 诊断：本轮实际用的遮挡陡度 k（= 配置值 x 强度）。 */
 		float lastK;
 		/** 0.12.6 诊断：主射线（未放宽）的遮挡值，用来对比"放宽了多少"。 */
@@ -513,7 +516,8 @@ public final class Acoustics {
 			// 【0.12.65】"声路"覆盖：若存在一条可走过去的路线（半径内 BFS 可达），
 			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
 			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
-			int pathLen = roomPathLength(world, jukebox, ear); // 【0.12.69】Valve 式：房间连通域路径
+			int pathLen = roomPathLength(world, jukebox, ear);
+			st.lastPathLen = pathLen; // 【0.12.69】Valve 式：房间连通域路径
 			if (pathLen > 0) {
 				double straight = Math.max(0.5, center.distanceTo(ear));
 				double detour = Math.max(0.0, pathLen / straight - 1.0);
@@ -522,9 +526,12 @@ public final class Acoustics {
 				// 加法映射：绕行比每多 1 倍距离 → 遮挡 +0.35。
 				//   一根 1 格方块（绕 2 格 / 7 格，detour≈0.29）→ occ≈0.12 → 高频仅 -5 dB（几乎听不出）
 				//   绕房子半圈（detour≈2）→ occ≈0.72 → 明显闷
-				double f = 0.02 + 0.35 * detour;
+				double f = 0.02 + 0.5 * detour; // 【0.13.1】放缓：门在十几格外时不再等于"完全没减"
 				// 用房间路径结果【替换】（而非在材质遮挡上封顶）：这是 Valve 模型的核心
 				occ = Math.min(occ, f);
+				// 【0.13.1】"有路"至少比"没路"轻 25%：现实中门开着（即使你在墙边）总比关门清楚一档
+				occ = Math.min(occ, 0.75);
+				st.lastPathF = (float) occ;
 			}
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
 			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
