@@ -526,6 +526,12 @@ public final class Acoustics {
 
 		// ---- 混响射线（M4/M5）：从唱片机按黄金角球面均匀发射，每条最多 4 次反弹 ----
 		ReverbResult rr = traceReverb(world, center, ear, jukebox, occ, k);
+		// 【0.12.55】反射通路优先：只要有一条反弹射线能"暴露到听者所在空间"（360° 无死角），
+		// 就说明声音能绕过障碍从间接路径到达 —— 现实里硬表面反射几乎不损失能量（0.04~0.2 dB），
+		// 所以这时不该被判成"密闭般闷"。幅度先取 0.15（保留一点空间感），后续可按实测再调。
+		if (rr.earReach > 0) {
+			occ *= 0.15;
+		}
 		float avgShared = rr.sharedAirspaceWeight;
 		st.openness = occ <= 0.0 ? 1.0f : avgShared;
 
@@ -710,6 +716,12 @@ public final class Acoustics {
 		final float[] bandRefl = new float[REVERB_BOUNCES];
 		float sharedAirspaceWeight;
 		float distanceFactor = 1.0f;
+		/**
+		 * 【0.12.55】反射通路计数：有多少个反弹命中点"能直视到听者"。
+		 * 物理依据（外部查证）：硬表面一次镜面反射损失仅 10·log10(1−α) ≈ 0.04~0.2 dB（混凝土/玻璃 α≈0.01~0.05），
+		 * 几乎可忽略 ⇒ 只要存在这样一条间接通路，听感应与直达声同样清楚。
+		 */
+		int earReach;
 		/** 0.12.6：兜底反射率 0.40 → 0.60（反射率越高，混响越亮/越明显）。 */
 		double avgReflectivity = 0.6;
 		double avgFreePath = 4.0;
@@ -783,6 +795,7 @@ public final class Acoustics {
 					clearLineTests++;
 					Vec3d hp = hit.point().add(hit.normal().multiply(0.002));
 					if (RayWalk.cast(world, hp, ear, MAX_CLEAR_LINE_STEPS) == null) {
+						out.earReach++;
 						sharedAirspaces++;
 						Vec3d d = ear.subtract(hp);
 						double len = d.length();
