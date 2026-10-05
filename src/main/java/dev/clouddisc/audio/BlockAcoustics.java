@@ -29,7 +29,7 @@ import java.util.Map;
  *       遮挡 × {@link #NON_FULL_BLOCK_OCCLUSION}。一条缝就该让遮挡降下来。</li>
  *   <li><b>液体</b>：{@code getFluidState()} 非空 → 遮挡大幅下调（水几乎不挡声，但很吸声）。</li>
  *   <li><b>硬度微调</b>：硬度 &lt; 0（基岩/屏障这类"不可破坏"）算满遮挡；
- *       硬度 == 0（火把/作物/花这类一碰就碎）→ 遮挡 ×0.35。</li>
+ *       硬度 == 0（火把/作物/花这类一碰就碎）→ 遮挡 ×0.65。</li>
  * </ol>
  *
  * <p><b>缓存</b>：{@link IdentityHashMap}（{@code BlockState} 是单例，恒等比较最快）。
@@ -155,7 +155,7 @@ public final class BlockAcoustics {
 		} else {
 			// 非完整方块（楼梯/栅栏/草/花/铁栏杆…）：缝隙多，遮挡打折
 			if (!opaque) {
-				occ *= 0.8f;
+				occ *= 0.95f;
 				source = source + "｜非不透明方块(遮挡×0.8)";
 			}
 			if (hardness < 0.0f) {
