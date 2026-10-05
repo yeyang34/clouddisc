@@ -146,6 +146,9 @@ public final class Acoustics {
 		long lastEvalTick = Long.MIN_VALUE / 2;
 		long lastTick = Long.MIN_VALUE / 2;
 		long lastLogTick = Long.MIN_VALUE / 2;
+	// 【0.12.46】最终遮挡的时间平滑（8 条偏移射线是整数台阶，跨墙角会 0→1 阶跃）
+	float smoothOcc = -1.0f;
+	long smoothOccTick = Long.MIN_VALUE / 2;
 		/** 最近一次射线评估的耗时（纳秒），用于日志里的性能证据。 */
 		long evalNanos;
 		/** 沿连线累加出来的遮挡值（诊断用，也是日志里的关键数字）。 */
@@ -485,7 +488,22 @@ public final class Acoustics {
 			//   · 声源被封闭（小屋/矿洞里的唱片机）→ ×1.0（完整物理，门开/门关照旧生效）
 			float gate = spaceGate(world, ear, center);
 			st.lastSpaceGate = gate;
-			occ *= 1.0f; // 【0.12.40】空间闸门停用：露天一堵墙也会被它清零 ✗。gate 仍计算并记录，可用日志观察
+			occ *= 1.0f; // 【0.12.40】空间闸门停用；gate 仍计算并记录，可用日志观察
+			// 【0.12.46】对最终遮挡做时间平滑（时间常数约 8 刻 = 0.4 秒）。
+			// 原因：偏移射线只有 8 条，"被挡占比"是 0/8…8/8 的整数台阶 —— 贴着墙听是 1.0，
+			// 走开五六格跨过墙角时好几条同时变通透 → 遮挡一步跳下来 → 实测"声音突然变小、没有过渡"。
+			// 平滑后任何跳变都变成 0.4 秒的过渡，听感自然。
+			{
+				long dt = nowTick - st.smoothOccTick;
+				if (st.smoothOcc < 0.0f || dt <= 0L || dt > 100L) {
+					st.smoothOcc = (float) occ;
+				} else {
+					float kk = (float) (1.0 - Math.exp(-dt / 8.0));
+					st.smoothOcc += ((float) occ - st.smoothOcc) * kk;
+				}
+				st.smoothOccTick = nowTick;
+				occ = st.smoothOcc;
+			}
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
