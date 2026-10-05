@@ -547,7 +547,7 @@ public final class Acoustics {
 			cutoff *= 0.3f;
 		}
 
-		st.tDirectCutoff = clamp01(cutoff);
+		st.tDirectCutoff = clamp01(Math.max(0.015f, cutoff)); // 【0.12.53】滤波下限 -36 dB：真实墙体仍会漏一点中频，不会只剩低音嗡嗡
 		st.tDirectGain = clamp01(Math.max(0.55f, gain)); // 【0.12.48】直通增益下限 0.40（-8 dB）：遮挡再深也听得清内容。只压增益、不碰遮挡判据（0.12.43 的教训）
 
 		// ---- M6 方向性：把声源位置沿"反射来向"偏移（到听者的距离不变，所以音量不变） ----
