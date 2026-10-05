@@ -1533,7 +1533,9 @@ public final class Acoustics {
 		st.directCutoff += (st.tDirectCutoff - st.directCutoff) * k;
 		st.directGain += (st.tDirectGain - st.directGain) * k;
 		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
-			st.sendGain[i] += (st.tSendGain[i] - st.sendGain[i]) * k;
+			// 【0.12.73】发送量单独放慢（k*0.3 ≈ 0.5 秒）：原来与滤波共用 0.15 秒，
+			// 被墙/柱子/关门挡上时余响会"啪"地消失（用户反馈突兀）。滤波截止的滑动保持不变。
+			st.sendGain[i] += (st.tSendGain[i] - st.sendGain[i]) * (k * 0.3f);
 			st.sendCutoff[i] += (st.tSendCutoff[i] - st.sendCutoff[i]) * k;
 		}
 		if (!st.posSeeded) {
