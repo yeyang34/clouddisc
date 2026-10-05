@@ -55,7 +55,7 @@ public final class Acoustics {
 	/** 遮挡射线评估的间隔（tick）：4 刻 = 5Hz。参数层仍然每 tick 平滑+下发。 */
 	private static final int INTERVAL_TICKS = 4;
 	/** 参数层的收敛时间（秒）——按时间算，不按调用次数。 */
-	private static final float SMOOTH_SECONDS = 0.15f;
+	private static final float SMOOTH_SECONDS = 0.6f; // 【0.13.1】0.15s 太快 → 从闷变亮时音色"啪"地跳（实测）
 	// ---------------------------------------------------------------- 0.12.6 调参（"变闷要明显"）
 	/**
 	 * 遮挡累积值 → 截止的陡度 {@code cutoff = exp(-occ*k)}。
