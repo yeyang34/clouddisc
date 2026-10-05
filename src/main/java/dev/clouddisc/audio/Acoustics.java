@@ -92,7 +92,7 @@ public final class Acoustics {
 	 */
 	private static final float OPENNESS_GATE_OCC = 0.6f;
 	/** 偏移射线算作"一条通透通路"的遮挡阈值：≤ 它就认为这条线是通的。 */
-	private static final double OPEN_PATH_OCC = 0.80;
+	private static final double OPEN_PATH_OCC = 0.35;
 	/**
 	 * 放宽幅度上限：最多把遮挡降到 {@code 1 - MAX_RELAX} = 15%。
 	 * <p>0.12.5 是"8 个偏移点取最小值"—— 只要有一条缝，遮挡直接归零、效果全没了。
