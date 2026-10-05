@@ -533,6 +533,12 @@ public final class Acoustics {
 		// 所以这时不该被判成"密闭般闷"。幅度先取 0.15（保留一点空间感），后续可按实测再调。
 		// 【0.12.60】互易搜索：从听者出发找"能走到唱片机"的路径（用户思路：用自己的射线接住它）
 		int backPaths = listenerPathsTo(world, ear, center, jukebox);
+		// 【0.12.61】边缘绕射：朝挡路方块的角发专门射线（"声音拐弯"的物理机制）
+		int edgePaths = edgePathsTo(world, ear, center, jukebox);
+		if (edgePaths > 0) {
+			// 绕射比镜面反射多损失一些能量（Maekawa 低频渐近约 5 dB），所以封顶比 0.25 松一点
+			occ = Math.min(occ, 0.45);
+		}
 		if (rr.earReach > 0 || backPaths > 0) {
 			// 【0.12.59】关键修正：声音是【绕过去/反射过去】的，直线路径上那堵墙根本不该算进去 ✗。
 			// 之前用 occ *= 0.15 缩放：当直线遮挡累积到 2~3 时，剩 0.3~0.45 → 高频仍被削 -17 dB ✗
@@ -1225,6 +1231,50 @@ public final class Acoustics {
 			if (hits >= 3) {
 				break; // 够用了，省开销
 			}
+		}
+		return hits;
+	}
+
+	/**
+	 * 【0.12.61】边缘绕射搜索（参考资料第 4 条：针对遮挡几何的【边缘】发射专门射线）。
+	 *
+	 * <p>为什么需要它：均匀撒向四周的金角射线要恰好穿过一扇门/绕过一根柱子，是"大海捞针"
+	 * （实测日志：主射线遮挡=1.000 而两条路径搜索都返回 0）。现实里声音是【绕边缘】拐弯的，
+	 * 所以应该直接朝"挡路那个方块的 8 个角"发射线，检查 听者→角→声源 这条折线是否两段都通畅。
+	 *
+	 * @return 可行的绕行折线条数（≥1 即存在绕射通路）
+	 */
+	private static int edgePathsTo(World world, Vec3d ear, Vec3d center, BlockPos jukebox) {
+		int hits = 0;
+		try {
+			RayWalk.Hit h = RayWalk.cast(world, ear, center, MAX_REVERB_STEPS);
+			if (h == null) {
+				return 1; // 直线本来就通
+			}
+			BlockPos bp = h.pos;
+			Vec3d bc = new Vec3d(bp.getX() + 0.5, bp.getY() + 0.5, bp.getZ() + 0.5);
+			for (int dx = 0; dx <= 1; dx++) {
+				for (int dy = 0; dy <= 1; dy++) {
+					for (int dz = 0; dz <= 1; dz++) {
+						Vec3d corner = new Vec3d(bp.getX() + dx, bp.getY() + dy, bp.getZ() + dz);
+						Vec3d dirOut = corner.subtract(bc);
+						if (dirOut.lengthSquared() < 1.0e-6) {
+							continue;
+						}
+						// 稍微往外推一点，避免射线起点正好贴在方块面上
+						Vec3d p = corner.add(dirOut.normalize().multiply(0.06));
+						if (RayWalk.cast(world, ear, p, MAX_REVERB_STEPS) == null
+								&& RayWalk.cast(world, p, center, MAX_REVERB_STEPS) == null) {
+							hits++;
+							if (hits >= 2) {
+								return hits; // 够用
+							}
+						}
+					}
+				}
+			}
+		} catch (Throwable t2) {
+			return 0;
 		}
 		return hits;
 	}
