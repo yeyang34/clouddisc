@@ -233,7 +233,7 @@ public final class BlockAcoustics {
 				|| g == BlockSoundGroup.HANGING_SIGN || g == BlockSoundGroup.NETHER_WOOD_HANGING_SIGN
 				|| g == BlockSoundGroup.BAMBOO_WOOD_HANGING_SIGN || g == BlockSoundGroup.CHERRY_WOOD_HANGING_SIGN
 				|| g == BlockSoundGroup.SCAFFOLDING || g == BlockSoundGroup.LADDER) {
-			return new Base("声音组 GRASS(草木/树叶)", 0.30f, 0.28f, 0.65f);
+			return new Base("声音组 GRASS(草木/树叶)", 0.12f, 0.28f, 0.65f);
 		}
 		// ---- 沙 / 土 / 砾 / 泥 / 菌岩：松散地面，吸声较强（0.75 → 0.70）----
 		if (g == BlockSoundGroup.SAND || g == BlockSoundGroup.GRAVEL || g == BlockSoundGroup.SOUL_SAND
