@@ -93,7 +93,15 @@ public final class BlockAcoustics {
 		Params p = of(state);
 		float occ = p.occlusion();
 		try {
-			if (!state.isOpaqueFullCube(world, pos)) {
+			// 【0.12.79】没有碰撞体积的方块（开着的门/活板门、火把、花、草…）等于空气：
+		// 原来只按方块种类查材质 → 开着的门照样贡献 0.55，于是"开着的门还在挡声"，
+		// 而被挖掉的方块是空气=0（实测：开着的门不像挖洞那样漏音）。这里返回 float 遮挡值。
+		try {
+			if (state.getCollisionShape(world, pos).isEmpty()) {
+				return 0.0f;
+			}
+		} catch (Throwable ignored) {
+		}		if (!state.isOpaqueFullCube(world, pos)) {
 				// 【0.12.10 修门】原来这里对"不是完整方块"再打 0.5 折 -> 关着的门只有 0.22，跟没挡一样。
 				// 现在几何阻挡由射线的碰撞形状判定（Acoustics.occlusionAt），这里不再重复打折。
 				// occ 保持不变（刻意留空，方便日后回退）
