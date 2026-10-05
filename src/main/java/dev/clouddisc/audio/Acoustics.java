@@ -1419,7 +1419,14 @@ public final class Acoustics {
 	/** 该格是否为"空气/可穿过"（无碰撞体积）。 */
 	private static boolean freeAt(World world, BlockPos p) {
 		try {
-			return world.getBlockState(p).getCollisionShape(world, p).isEmpty();
+			net.minecraft.block.BlockState st = world.getBlockState(p);
+			// 【0.13.3】开着的门/活板门/栅栏门：碰撞体积仍在（门扇只是转到侧面，形状很薄），
+			// 所以不能只看 isEmpty()。必须判【open 属性】—— 否则洪泛穿不过门，声音就"流不出来"。
+			if (st.contains(net.minecraft.state.property.Properties.OPEN)
+					&& st.get(net.minecraft.state.property.Properties.OPEN)) {
+				return true;
+			}
+			return st.getCollisionShape(world, p).isEmpty();
 		} catch (Throwable t) {
 			return false;
 		}

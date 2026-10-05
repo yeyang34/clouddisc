@@ -90,6 +90,14 @@ public final class BlockAcoustics {
 	 * <p>需要 {@code world/pos} 只是为了 {@link BlockState#isOpaqueFullCube}（它可能跟位置有关）。
 	 */
 	public static float occlusionOf(BlockState state, BlockView world, BlockPos pos) {
+		// 【0.13.3】开着的门/活板门/栅栏门 = 空气（碰撞体积仍在，必须判 open 属性）
+		try {
+			if (state.contains(net.minecraft.state.property.Properties.OPEN)
+					&& state.get(net.minecraft.state.property.Properties.OPEN)) {
+				return 0.0f;
+			}
+		} catch (Throwable ignored) {
+		}
 		Params p = of(state);
 		float occ = p.occlusion();
 		try {
