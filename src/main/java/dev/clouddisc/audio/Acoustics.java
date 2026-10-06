@@ -365,8 +365,19 @@ public final class Acoustics {
 
 			// ③ 应用层
 			Vec3d center = centerOf(jukebox);
-			if (directionEnabled()) {
-				applyPosition(sourceId, st, center.x, center.y, center.z);
+			// 【0.13.3】把写给 OpenAL 的声源位置【向听者拉近】，压制"像只戴一边耳机"的硬声像。
+			// 现实里转头导致的双耳差只有几 dB；OpenAL 默认声道声像却接近"整份能量只给一只耳朵"。
+			// 拉近使横向偏移变小（声像温和），且沿"听者方向"拉 → 距离变化极小（<1 dB）→ 音量不变。
+			// 必须【无条件】执行：只在方向性开启时写位置的话，方向性关着就是 MC 默认的硬声像。
+			{
+				Vec3d le = new Vec3d(self.getX(), self.getEyeY(), self.getZ());
+				double dist = center.distanceTo(le);
+				double pull = dist <= 2.0
+						? (0.95 - 0.30 * dist)
+						: Math.max(0.0, 0.62 - 0.06 * (dist - 2.0));
+				pull = Math.max(0.0, Math.min(1.0, pull));
+				Vec3d written = center.add(le.subtract(center).multiply(pull));
+				applyPosition(sourceId, st, written.x, written.y, written.z);
 			}
 			if (EfxEngine.isAvailable()) {
 				syncReverb(st);
