@@ -98,7 +98,7 @@ public final class CloudDiscServer implements ModInitializer {
 					continue;
 				}
 				try {
-					PacketByteBuf out = PacketByteBufs.create();
+					FriendlyByteBuf out = FriendlyByteBufs.create();
 					out.writeByte(first);
 					out.writeBytes(payload);
 					ServerPlayNetworking.send(other, CloudDiscNet.RELAY, out);
@@ -124,7 +124,7 @@ public final class CloudDiscServer implements ModInitializer {
 
 	private static void sendHello(ServerPlayerEntity player) {
 		try {
-			PacketByteBuf ack = PacketByteBufs.create();
+			FriendlyByteBuf ack = FriendlyByteBufs.create();
 			ack.writeByte(CloudDiscNet.TYPE_HELLO);
 			ack.writeByte(CloudDiscNet.CONVENTION_VERSION);
 			ServerPlayNetworking.send(player, CloudDiscNet.RELAY, ack);

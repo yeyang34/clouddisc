@@ -30,19 +30,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ChatHud.class)
 public abstract class ChatHudMixin {
 	/** 单参数版本：系统消息等走这里。 */
-	@Inject(method = "addMessage(Lnet/minecraft/text/Text;)V", at = @At("HEAD"), cancellable = true)
-	private void clouddisc$addMessage(Text message, CallbackInfo ci) {
+	@Inject(method = "addMessage(Lnet/minecraft/text/Component;)V", at = @At("HEAD"), cancellable = true)
+	private void clouddisc$addMessage(Component message, CallbackInfo ci) {
 		hideIfOurs(message, ci);
 	}
 
 	/** 三参数版本：玩家聊天（带签名）走这里。addMessage 有多个重载，所以必须写完整描述符。 */
-	@Inject(method = "addMessage(Lnet/minecraft/text/Text;Lnet/minecraft/network/message/MessageSignatureData;Lnet/minecraft/client/gui/hud/MessageIndicator;)V",
+	@Inject(method = "addMessage(Lnet/minecraft/text/Component;Lnet/minecraft/network/message/MessageSignature;Lnet/minecraft/client/gui/hud/MessageIndicator;)V",
 			at = @At("HEAD"), cancellable = true)
-	private void clouddisc$addMessageSigned(Text message, MessageSignatureData signature, MessageIndicator indicator, CallbackInfo ci) {
+	private void clouddisc$addMessageSigned(Component message, MessageSignature signature, MessageIndicator indicator, CallbackInfo ci) {
 		hideIfOurs(message, ci);
 	}
 
-	private static void hideIfOurs(Text message, CallbackInfo ci) {
+	private static void hideIfOurs(Component message, CallbackInfo ci) {
 		if (message == null) {
 			return;
 		}

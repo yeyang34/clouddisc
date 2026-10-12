@@ -76,14 +76,14 @@ public final class ServerRelayTransport implements Transport {
 		if (isReady() || helloAttempts >= MAX_HELLO_ATTEMPTS) {
 			return;
 		}
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.getNetworkHandler() == null) {
 			return;
 		}
 		helloAttempts++;
 		client.execute(() -> {
 			try {
-				PacketByteBuf buf = PacketByteBufs.create();
+				FriendlyByteBuf buf = FriendlyByteBufs.create();
 				buf.writeByte(CloudDiscNet.TYPE_HELLO);
 				buf.writeByte(CloudDiscNet.CONVENTION_VERSION);
 				ClientPlayNetworking.send(CloudDiscNet.RELAY, buf);
@@ -104,10 +104,10 @@ public final class ServerRelayTransport implements Transport {
 			return;
 		}
 		byte[] json = Protocol.toBytes(msg);
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> {
 			try {
-				PacketByteBuf buf = PacketByteBufs.create();
+				FriendlyByteBuf buf = FriendlyByteBufs.create();
 				buf.writeByte(CloudDiscNet.TYPE_DATA);
 				buf.writeBytes(json);
 				ClientPlayNetworking.send(CloudDiscNet.RELAY, buf);

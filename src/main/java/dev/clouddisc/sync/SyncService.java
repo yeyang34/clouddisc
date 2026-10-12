@@ -77,28 +77,28 @@ public final class SyncService implements PlaybackController.Announcer {
 
 	/** 来自 {@code ClientWorldMixin}：原版世界事件 1010/1011。 */
 	public PlaybackController.Decision onWorldEvent(ClientWorld world, BlockPos pos, int eventId, int data) {
-		// 注意：Yarn 的 World#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
+		// 注意：Yarn 的 Level#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
 		// 千万不要用 getTimeOfDay()（会被 /time 改、会被 doDaylightCycle 冻住）。
 		return playback.onWorldEvent(world.getRegistryKey().getValue(), pos, eventId, data, world.getTime());
 	}
 
 	/** 来自 {@code UseBlockCallback}：本地玩家右键方块。 */
-	public ActionResult onUseBlock(PlayerEntity player, World world, Hand hand, BlockHitResult hit) {
+	public InteractionResult onUseBlock(Player player, Level world, Hand hand, BlockHitResult hit) {
 		if (!world.isClient() || hand != Hand.MAIN_HAND) {
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		}
 		if (!world.getBlockState(hit.getBlockPos()).isOf(Blocks.JUKEBOX)) {
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		}
 		ItemStack stack = player.getStackInHand(hand);
 		if (stack.isEmpty()) {
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		}
 		playback.noteLocalUse(world.getRegistryKey().getValue(), hit.getBlockPos(), stack.getName());
-		return ActionResult.PASS;
+		return InteractionResult.PASS;
 	}
 
-	public void tick(MinecraftClient mc) {
+	public void tick(Minecraft mc) {
 		if (mc.world == null) {
 			return;
 		}
@@ -142,7 +142,7 @@ public final class SyncService implements PlaybackController.Announcer {
 	public void onJoin() {
 		// 中途加入：原版不会给新来的玩家重发 1010 事件，所以必须自己主动问一轮。
 		// 第一次问可能还没有发现同伴（组播发现要约 2 秒），所以在 +1s / +3s / +10s 各问一次。
-		MinecraftClient mc = MinecraftClient.getInstance();
+		Minecraft mc = Minecraft.getInstance();
 		long now = mc.world == null ? 0L : mc.world.getTime();
 		joinTick = now;
 		queryDone = false;
@@ -337,8 +337,8 @@ public final class SyncService implements PlaybackController.Announcer {
 			}
 		}
 		// 通道线程 → 客户端线程
-		MinecraftClient.getInstance().execute(() -> {
-			ClientWorld world = MinecraftClient.getInstance().world;
+		Minecraft.getInstance().execute(() -> {
+			ClientWorld world = Minecraft.getInstance().world;
 			if (world == null) {
 				return;
 			}

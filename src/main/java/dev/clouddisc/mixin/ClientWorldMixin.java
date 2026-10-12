@@ -26,7 +26,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientWorld.class)
 public abstract class ClientWorldMixin {
 	@Inject(method = "syncWorldEvent", at = @At("HEAD"), cancellable = true)
-	private void clouddisc$syncWorldEvent(PlayerEntity player, int eventId, BlockPos pos, int data, CallbackInfo ci) {
+	private void clouddisc$syncWorldEvent(Player player, int eventId, BlockPos pos, int data, CallbackInfo ci) {
 		if (eventId != 1010 && eventId != 1011) {
 			return;
 		}

@@ -21,9 +21,9 @@ import org.lwjgl.openal.EXTEfx;
  * <p><b>只动我们自己的声源</b>：{@link #applyToSource} 的调用方只会传
  * {@code CloudDiscSoundInstance} 对应的 source id，其余声音一个字节都不碰。
  *
- * <p>线程：{@link #init()} 在声音引擎线程（SoundSystem#start 的注入点）执行；
+ * <p>线程：{@link #init()} 在声音引擎线程（SoundManager#start 的注入点）执行；
  * {@link #applyToSource} 在主线程（客户端 tick）执行。OpenAL 自己是线程安全的，
- * 且原版也在主线程调 {@code alListener3f}（{@code SoundSystem#updateListenerPosition}），
+ * 且原版也在主线程调 {@code alListener3f}（{@code SoundManager#updateListenerPosition}），
  * 所以这两条路径都是原版已经在用的用法。
  *
  * <p><b>任何一步失败 → 永久回退 DSP</b>（{@link Acoustics#filterMono}），出声永远优先于效果。
@@ -100,7 +100,7 @@ public final class EfxEngine {
 
 	/**
 	 * 在"声音引擎刚建好 OpenAL 上下文"的那一刻创建 EFX 资源。
-	 * <p>调用点见 {@code dev.clouddisc.mixin.SoundSystemMixin}（挂在 {@code SoundSystem#start}
+	 * <p>调用点见 {@code dev.clouddisc.mixin.SoundSystemMixin}（挂在 {@code SoundManager#start}
 	 * 里 {@code SoundListener#init()} 之前 —— 这正是 SPR 用的挂点，此时 ALC 上下文已 current）。
 	 * <p><b>绝不抛异常</b>：任何失败都只记日志 + 永久回退。
 	 */

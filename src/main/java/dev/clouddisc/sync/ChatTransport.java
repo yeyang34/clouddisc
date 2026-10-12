@@ -75,7 +75,7 @@ public final class ChatTransport implements Transport {
 
 	@Override
 	public void send(Protocol.Msg msg) {
-		MinecraftClient mc = MinecraftClient.getInstance();
+		Minecraft mc = Minecraft.getInstance();
 		ClientPlayNetworkHandler handler = mc.getNetworkHandler();
 		if (handler == null || mc.player == null) {
 			return;
@@ -116,7 +116,7 @@ public final class ChatTransport implements Transport {
 
 	@Override
 	public boolean isReady() {
-		return MinecraftClient.getInstance().player != null;
+		return Minecraft.getInstance().player != null;
 	}
 
 	/**
