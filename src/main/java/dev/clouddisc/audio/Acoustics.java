@@ -9,7 +9,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.audio.Channel;
 import net.minecraft.client.resources.sounds.SoundInstance;
-import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.client.sounds.SoundEngine;
+import net.minecraft.client.sounds.ChannelAccess;
 import com.mojang.blaze3d.audio.Channel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.core.BlockPos;
@@ -132,7 +133,7 @@ public final class Acoustics {
 	private static volatile boolean pendingOurs = false;
 	private static volatile int lastSourceId = 0;
 	private static volatile long lastSourceTick = Long.MIN_VALUE / 2;
-	private static volatile SoundManager soundSystem;
+	private static volatile SoundEngine soundEngine;
 
 	// ---------------------------------------------------------------- 每个声源的平滑状态
 	private static final class State {
@@ -220,8 +221,8 @@ public final class Acoustics {
 	}
 
 	/** 把声音系统实例记下来，供"按声音实例精确反查 source id"用。 */
-	public static void noteSoundSystem(SoundManager ss) {
-		soundSystem = ss;
+	public static void noteSoundSystem(SoundEngine ss) {
+		soundEngine = ss;
 	}
 
 	/** 声源真正 play() 时来领：如果刚才标记的是我们的实例，就认领并捕获 id。 */
@@ -273,12 +274,24 @@ public final class Acoustics {
 	 * @return 0 表示暂时拿不到（声源还没建好 / 已经停掉），调用方应跳过本轮
 	 */
 	private static int resolveSourceId(SoundInstance instance) {
-		SoundManager ss = soundSystem;
+		SoundEngine ss = soundEngine;
 		if (ss == null || instance == null) {
 			return 0;
 		}
 		try {
-			return -1; // [26.2] 暂缓：Source/Channel 体系变更，先返回 -1（不影响编译与其它功能）
+			// 【26.2】精确反查：SoundEngine#instanceToChannel → ChannelHandle → Channel#source
+			java.util.Map<SoundInstance, ChannelAccess.ChannelHandle> map =
+					((dev.clouddisc.mixin.SoundSystemAccessor) (Object) ss).clouddisc$instanceToChannel();
+			ChannelAccess.ChannelHandle handle = map == null ? null : map.get(instance);
+			if (handle == null || handle.isStopped()) {
+				return 0;
+			}
+			com.mojang.blaze3d.audio.Channel ch =
+					((dev.clouddisc.mixin.ChannelHandleAccessor) (Object) handle).clouddisc$channel();
+			if (ch == null) {
+				return 0;
+			}
+			return ((dev.clouddisc.mixin.SourceAccessor) (Object) ch).clouddisc$source();
 		} catch (Throwable t) {
 			return 0;
 		}

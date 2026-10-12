@@ -30,6 +30,7 @@ public class SoundSystemMixin {
 	private void clouddisc$mark(SoundInstance sound, CallbackInfoReturnable<SoundEngine.PlayResult> cir) {
 		try {
 			Acoustics.markNextOwnSource(sound instanceof CloudDiscSoundInstance);
+			Acoustics.noteSoundSystem((SoundEngine) (Object) this);
 		} catch (Throwable t) {
 			// 绝不因为标记失败影响原版播放
 		}

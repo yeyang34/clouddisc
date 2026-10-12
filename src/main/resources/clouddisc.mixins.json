@@ -8,6 +8,7 @@
     "ChatHudMixin",
     "SourceAccessor",
     "SoundSystemAccessor",
+    "ChannelHandleAccessor",
     "SourceMixin",
     "SoundSystemMixin",
     "SoundLoaderMixin"
