@@ -385,6 +385,8 @@ public class CloudDiscConfigScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		// 【26.2】先铺一层半透明底（等价于旧 renderBackground ✓ 但必须画在最前面）
+		context.fill(0, 0, this.width, this.height, 0x40000000);
 		// ---------------- 设计层（只画装饰，不碰任何功能） ----------------
 		int cx = this.width / 2;
 		// 顶部标题带 + 主色细线
@@ -438,7 +440,7 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		// ---------------- 装饰到此为止，下面全是原有绘制 ----------------
-		context.fill(0, 0, this.width, this.height, 0xC0101010); // 【26.2】renderBackground 已移除
+		// 【26.2 修复】原来这行不透明遮罩画在所有文字之后 → 把 UI 盖住（表现为「界面没有文字」）✗ 已挪到方法最前面 ✓
 		context.centeredText(this.font, this.title, this.width / 2, 8, 0xFFFFFF);
 		// 标语 + 一句话定位
 		context.centeredText(this.font, Component.literal(CloudDiscClient.SLOGAN),
@@ -469,6 +471,35 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		super.extractRenderState(context, mouseX, mouseY, delta);
+	}
+
+	@Override
+	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
+		// 【26.2】顶部胶囊标签栏是手绘的（不是控件）→ 必须在这里手动命中判定 ✓
+		try {
+			int tabH = 18, gap = 6;
+			int avail = layRight - layLeft;
+			int[] w = new int[SECTION_COUNT];
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				w[i] = Math.max(24, (avail - gap * (SECTION_COUNT - 1)) / SECTION_COUNT);
+			}
+			int x = layLeft;
+			int y = 52;
+			double mx = event.x();
+			double my = event.y();
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				if (mx >= x && mx < x + w[i] && my >= y && my < y + tabH) {
+					section = i;
+					scroll = 0;
+					rebuildWidgets();
+					return true;
+				}
+				x += w[i] + gap;
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] tab 命中判定异常（已忽略）: {}", t.toString());
+		}
+		return super.mouseClicked(event, doubleClick);
 	}
 
 	@Override
