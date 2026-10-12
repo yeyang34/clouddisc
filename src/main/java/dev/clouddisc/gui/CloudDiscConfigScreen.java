@@ -385,6 +385,7 @@ public class CloudDiscConfigScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		super.extractRenderState(context, mouseX, mouseY, delta);
 		// 【26.2】先铺一层半透明底（等价于旧 renderBackground ✓ 但必须画在最前面）
 		context.fill(0, 0, this.width, this.height, 0x40000000);
 		// ---------------- 设计层（只画装饰，不碰任何功能） ----------------
@@ -470,7 +471,7 @@ public class CloudDiscConfigScreen extends Screen {
 				context.text(this.font, label.text(), label.x(), label.y(), 0xE0E0E0);
 			}
 		}
-		super.extractRenderState(context, mouseX, mouseY, delta);
+		// 【26.2】super 必须最先调用（它画界面底色），否则会把我们画的文字全盖住 ✗
 	}
 
 	@Override
