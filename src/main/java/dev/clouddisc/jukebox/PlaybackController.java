@@ -880,10 +880,34 @@ public final class PlaybackController {
 
 	/** 等待窗口内没人认领 → 把原版唱片声补上（会晚一点点，但总比一直静音好）。 */
 	private void fallbackVanilla(Held h) {
-		// 【26.2 移植】原版唱片回落路径待适配：
-		//   26.2 的唱片体系改成了 JukeboxSong / JukeboxSongPlayer（ItemStack 上不再有 RecordItem），
-		//   LevelRenderer 的 playSong 也改名了。阶段 4 用 JukeboxSongPlayer 恢复这条回落路径。
-		return;
+		// 【26.2 恢复】没人认领时，按原版方式把这张【原版唱片】放出来。
+		// 1.20.1 用的是 WorldRenderer#playSong(disc.getSound(), pos) ✗ 26.2 已移除 ✗
+		// 26.2 的等价做法：从方块实体取 JukeboxSong → 用它的 soundEvent 本地播一发 ✓
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) {
+			return;
+		}
+		BlockPos pos = h.pos;
+		if (!(mc.level.getBlockEntity(pos) instanceof net.minecraft.world.level.block.entity.JukeboxBlockEntity jb)) {
+			return;
+		}
+		try {
+			var song = jb.getSongPlayer().getSong();
+			if (song == null) {
+				return;
+			}
+			var holder = song.soundEvent();
+			if (holder == null || holder.value() == null) {
+				return;
+			}
+			// 与唱片机完全一致：RECORDS 类别 + 4.0 音量 + 1.0 音高 ✓
+			mc.level.playLocalSound(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+					holder.value(), net.minecraft.sounds.SoundSource.RECORDS, 4.0f, 1.0f, false);
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 无人认领 → 按原版播放唱片声 @ {}", pos);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 原版唱片回落失败（不影响其它功能）: {}", t.toString());
+		}
+	}
 	}
 
 	private void stopQuiet(JukeboxSession s) {
