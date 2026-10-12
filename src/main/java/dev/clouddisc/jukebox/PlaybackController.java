@@ -132,7 +132,7 @@ public final class PlaybackController {
 	}
 
 	private static long now() {
-		ClientLevel world = Minecraft.getInstance().world;
+		ClientLevel world = Minecraft.getInstance().level;
 		// Yarn getTime() == Mojang getGameTime()：只增不减、不受 /time 与 doDaylightCycle 影响
 		return world == null ? 0L : world.getTime();
 	}
@@ -261,10 +261,10 @@ public final class PlaybackController {
 	 */
 	private static boolean recordStillInserted(String dimId, BlockPos pos) {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.world == null || !mc.world.getRegistryKey().getValue().toString().equals(dimId)) {
+		if (mc.level == null || !mc.level.getRegistryKey().getValue().toString().equals(dimId)) {
 			return false;
 		}
-		net.minecraft.world.level.block.state.BlockState state = mc.world.getBlockState(pos);
+		net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(pos);
 		return state.contains(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD)
 				&& state.get(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD);
 	}
@@ -595,7 +595,7 @@ public final class PlaybackController {
 	 * 各自 {@code play()}，全程不做任何进度纠偏）。
 	 */
 	private void beginPrepare(JukeboxSession s, boolean announceAfterReady) {
-		final String uri = resolveUriForThisClient(s);
+		final String uri = resolveUriForThisClientSide(s);
 		if (uri == null || uri.isBlank()) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 会话没有可用 uri（可能来自不携带 URI 的通道）: {}", s.title);
 			stopQuiet(s);
@@ -751,7 +751,7 @@ public final class PlaybackController {
 	 * <p>http(s) 的 URI 直接沿用：网易云这类在线音源不需要对端配置任何东西（这正是
 	 * "只有发起方需要配置音源"的设计收益）。
 	 */
-	private String resolveUriForThisClient(JukeboxSession s) {
+	private String resolveUriForThisClientSide(JukeboxSession s) {
 		String uri = s.uri;
 		if (s.originator) {
 			return uri;
@@ -853,7 +853,7 @@ public final class PlaybackController {
 	/** 等待窗口内没人认领 → 把原版唱片声补上（会晚一点点，但总比一直静音好）。 */
 	private void fallbackVanilla(Held h) {
 		Minecraft mc = Minecraft.getInstance();
-		ClientLevel world = mc.world;
+		ClientLevel world = mc.level;
 		if (world == null || !world.getRegistryKey().getValue().toString().equals(h.dim)) {
 			return;
 		}
@@ -867,7 +867,7 @@ public final class PlaybackController {
 		//     HUD 会显示曲名、鹦鹉会跳舞；
 		//   · 以前用 world.playSound 放的是"野生声音"，没有任何人能停它 ——
 		//     等我们这边真接上时，就变成**两条音轨同时响**（实测 bug：有时候会卡出原版的音乐）。
-		mc.worldRenderer.playSong(disc.getSound(), h.pos);
+		mc.levelRenderer.playSong(disc.getSound(), h.pos);
 		CloudDiscClient.LOGGER.debug("[CloudDisc] 无人认领，回落原版唱片声 @ {}（走原版 playSong，可被接管时停掉）", h.pos);
 	}
 

@@ -297,7 +297,7 @@ public final class Acoustics {
 	}
 
 	private static long currentTick() {
-		Level w = Minecraft.getInstance().world;
+		Level w = Minecraft.getInstance().level;
 		return w == null ? 0L : w.getTime();
 	}
 
@@ -331,7 +331,7 @@ public final class Acoustics {
 				EfxEngine.ensureInit(nowTick);
 			}
 			Minecraft mc = Minecraft.getInstance();
-			Level world = mc.world;
+			Level world = mc.level;
 			Entity self = mc.player;
 			if (world == null || self == null) {
 				return;
@@ -477,7 +477,7 @@ public final class Acoustics {
 						// 原来无条件前移 1.5 格 —— 站在唱片机正上方时垂直偏移射线的起点被抬到屋顶之上，
 						// 屋顶完全不被计入 → 被挡占比 0 → occ = 0（实测："正上方房顶是透的，远一点就挡"）。
 						Vec3 offStart = offFrom;
-						if (offLen > 1.6 && !freeAt(world, BlockPos.ofFloored(offFrom.x, offFrom.y, offFrom.z))) {
+						if (offLen > 1.6 && !freeAt(world, BlockPos.containing(offFrom.x, offFrom.y, offFrom.z))) {
 							offStart = offFrom.add(offDir.multiply(1.5 / offLen));
 						}
 						double o = occlusionAt(world, offStart, offTo, jukebox);
@@ -603,7 +603,7 @@ public final class Acoustics {
 		// ---- M6 水下：直通再乘 0.1，混响发送也一起变闷 ----
 		boolean underwater = false;
 		try {
-			underwater = self.isSubmergedInWater();
+			underwater = self.isUnderWater();
 		} catch (Throwable ignored) {
 			// 取不到就当不在水下
 		}
@@ -822,7 +822,7 @@ public final class Acoustics {
 				{
 					Vec3 segEnd = hit == null ? end : hit.point();
 					Vec3 near = closestPointOnSegment(origin, segEnd, ear);
-					if (near != null && near.squaredDistanceTo(ear) <= EAR_REACH * EAR_REACH) {
+					if (near != null && near.distanceToSqr(ear) <= EAR_REACH * EAR_REACH) {
 						// 听者的"捕获射线"也要通（最近点到耳朵之间没有实体），
 						// 否则贴着墙站在墙外、射线在墙内掠过会被误判为听到了。
 						if (RayWalk.cast(world, near.add(ear.subtract(near).normalize().multiply(0.02)), ear, 24) == null) {
@@ -1163,7 +1163,7 @@ public final class Acoustics {
 						ClipContext.FluidHandling.NONE, self));
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
 					open++;
-				} else if (false && hit.getPos().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
+				} else if (false && hit.position().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
 					// 【0.12.35】只忽略 0.9 格以内的命中：那是脚下的地面 / 紧贴声源的方块（"就地放置"）。
 					// 上一版写成 2.0，结果小房间的墙（常在 1.5~2 格处）也被当成"就地放置"，
 					// 于是小屋里反而完全不闷 —— 实测反馈后收紧到 0.9。
@@ -1251,7 +1251,7 @@ public final class Acoustics {
 					break;
 				}
 				Vec3 near = closestPointOnSegment(origin, segEnd, center);
-				if (near != null && near.squaredDistanceTo(center) <= 2.25) {
+				if (near != null && near.distanceToSqr(center) <= 2.25) {
 					if (RayWalk.cast(world, near, center, 24) == null) {
 						hits++;
 						break;
@@ -1351,7 +1351,7 @@ public final class Acoustics {
 	 */
 	private static int pathLengthTo(Level world, BlockPos from, Vec3 ear) {
 		try {
-			BlockPos to = BlockPos.ofFloored(ear.x, ear.y, ear.z);
+			BlockPos to = BlockPos.containing(ear.x, ear.y, ear.z);
 			int ddx = from.getX() - to.getX();
 			int ddy = from.getY() - to.getY();
 			int ddz = from.getZ() - to.getZ();
@@ -1456,7 +1456,7 @@ public final class Acoustics {
 	 */
 	private static int roomPathLength(Level world, BlockPos from, Vec3 ear) {
 		try {
-			BlockPos to = BlockPos.ofFloored(ear.x, ear.y, ear.z);
+			BlockPos to = BlockPos.containing(ear.x, ear.y, ear.z);
 			int ddx = from.getX() - to.getX();
 			int ddy = from.getY() - to.getY();
 			int ddz = from.getZ() - to.getZ();

@@ -1,6 +1,6 @@
 package dev.clouddisc.disc;
 
-import net.minecraft.network.chat.Text;
+import net.minecraft.network.chat.Component;
 
 /**
  * 唱片"名字即协议"。

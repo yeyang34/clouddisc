@@ -84,7 +84,7 @@ public final class SyncService implements PlaybackController.Announcer {
 
 	/** 来自 {@code UseBlockCallback}：本地玩家右键方块。 */
 	public InteractionResult onUseBlock(Player player, Level world, InteractionHand hand, BlockHitResult hit) {
-		if (!world.isClient() || hand != InteractionHand.MAIN_HAND) {
+		if (!world.isClientSide() || hand != InteractionHand.MAIN_HAND) {
 			return InteractionResult.PASS;
 		}
 		if (!world.getBlockState(hit.getBlockPos()).isOf(Blocks.JUKEBOX)) {
@@ -99,17 +99,17 @@ public final class SyncService implements PlaybackController.Announcer {
 	}
 
 	public void tick(Minecraft mc) {
-		if (mc.world == null) {
+		if (mc.level == null) {
 			return;
 		}
-		long now = mc.world.getTime();
+		long now = mc.level.getTime();
 		// 中途加入时的主动询问：**问到有结果为止**（每 2 秒一次，最多 30 秒）
 		//
 		// 改成这样的原因（实测偶现："退出世界再回来有时不播放，时好时坏"）：
 		// 老的写法是进服后固定问 3 次（1/3/10 秒）。如果这 3 次恰好都撞上
 		// "此刻还没发现同伴"（消息被丢弃）或应答丢失，就**再也不会重试** → 静音。
 		// 现在只要还没有会话就一直问下去，直到 30 秒为止。
-		if (!queryDone && mc.world != null && now >= nextQueryTick) {
+		if (!queryDone && mc.level != null && now >= nextQueryTick) {
 			if (playback.sessionCount() > 0) {
 				queryDone = true;
 				CloudDiscClient.LOGGER.info("[CloudDisc] 询问已有结果（本机已建立会话）");
@@ -127,7 +127,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		// 应答一过期就会出现一段"没有任何通道"的窗口（日志里 relay=0, chat=0），
 		// 恰好在这段窗口里放碟 → PLAY 发不出去 → 跟随方回落原版（表现为"时好时坏"）。
 		// 现在每 20 秒续一次（远小于应答有效期），通道基本恒为可用。
-		if (relayTransport != null && mc.world != null) {
+		if (relayTransport != null && mc.level != null) {
 			relayHelloCooldown--;
 			if (relayHelloCooldown <= 0) {
 				relayHelloCooldown = 400;   // 20 秒
@@ -143,7 +143,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		// 中途加入：原版不会给新来的玩家重发 1010 事件，所以必须自己主动问一轮。
 		// 第一次问可能还没有发现同伴（组播发现要约 2 秒），所以在 +1s / +3s / +10s 各问一次。
 		Minecraft mc = Minecraft.getInstance();
-		long now = mc.world == null ? 0L : mc.world.getTime();
+		long now = mc.level == null ? 0L : mc.level.getTime();
 		joinTick = now;
 		queryDone = false;
 		nextQueryTick = now + 20L;
@@ -338,7 +338,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		}
 		// 通道线程 → 客户端线程
 		Minecraft.getInstance().execute(() -> {
-			ClientLevel world = Minecraft.getInstance().world;
+			ClientLevel world = Minecraft.getInstance().level;
 			if (world == null) {
 				return;
 			}
