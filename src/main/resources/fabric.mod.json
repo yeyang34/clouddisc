@@ -12,14 +12,8 @@
 	"icon": "assets/clouddisc/icon.png",
 	"environment": "*",
 	"entrypoints": {
-		"main": [
-			"dev.clouddisc.server.CloudDiscServer"
-		],
 		"client": [
 			"dev.clouddisc.CloudDiscClient"
-		],
-		"modmenu": [
-			"dev.clouddisc.gui.ModMenuIntegration"
 		]
 	},
 	"mixins": [
