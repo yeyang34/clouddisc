@@ -530,6 +530,23 @@ public final class PlaybackController {
 		}
 	}
 
+	/**
+	 * 【单曲循环】把当前会话退回 0 秒继续播放（无缝重播）。
+	 * <p>做法：向音频管线请求 seek 到 0 ✓ 并把会话的时间基准重置到"现在"✓
+	 * 与原版唱片机的区别：原版放完会停；我们这里按配置 loopSingle 决定是否循环。
+	 */
+	private void loopBack(JukeboxSession s, long nowTick, long realEnd) {
+		try {
+			s.msAtStart = 0L;
+			s.startedTick = nowTick;
+			s.pipeline.requestSeek(0L);
+			CloudDiscClient.LOGGER.info("[CloudDisc] 单曲循环：已回到开头（本轮时长 {}ms）", realEnd);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 单曲循环重播失败，改为停止: {}", t.toString());
+			stopQuiet(s);
+			announcer.announceStop(s, nowTick);
+		}
+	}
 	// ------------------------------------------------------------ 内部流程
 
 	private void startSession(JukeboxSession s, long nowTick) {

@@ -174,6 +174,9 @@ public final class CloudDiscConfig {
 	public boolean physicsSoundDirection = true;
 
 	/** 是否允许聊天通道作为兜底信令/数据通道。 */
+	/** 【单曲循环】一张云唱片播完后，自动回到开头继续播（默认开 ✓）。 */
+	public boolean loopSingle = true;
+
 	public boolean enableChatRelay = true;
 	/**
 	 * 聊天通道是否只作兜底（默认<b>开</b>）。
