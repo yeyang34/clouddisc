@@ -7,7 +7,8 @@
     "ClientWorldMixin",
     "ChatHudMixin",
     "SourceAccessor",
-    "SoundSystemAccessor"
+    "SoundSystemAccessor",
+    "SourceMixin"
   ],
   "injectors": {
     "defaultRequire": 0
