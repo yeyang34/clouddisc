@@ -3,7 +3,10 @@
   "minVersion": "0.8",
   "package": "dev.clouddisc.mixin",
   "compatibilityLevel": "JAVA_17",
-  "client": [],
+  "client": [
+    "ClientWorldMixin",
+    "ChatHudMixin"
+  ],
   "injectors": {
     "defaultRequire": 0
   }
