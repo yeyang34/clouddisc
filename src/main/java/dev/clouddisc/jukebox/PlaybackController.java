@@ -264,9 +264,14 @@ public final class PlaybackController {
 		if (mc.level == null || !mc.level.dimension().identifier().toString().equals(dimId)) {
 			return false;
 		}
-		net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(pos);
-		return false /* [26.2] HAS_RECORD 已移除（JukeboxSong 体系） */
-				&& false /* [26.2] HAS_RECORD 已移除 */;
+		// 【26.2】1.20.1 的 JukeboxBlock.HAS_RECORD 属性没了 ✗
+		// 26.2 改成：直接看方块实体里那张唱片还在不在（javap 实测 getTheItem() ✓）
+		net.minecraft.world.level.block.entity.BlockEntity be = mc.level.getBlockEntity(pos);
+		if (be instanceof net.minecraft.world.level.block.entity.JukeboxBlockEntity jb) {
+			net.minecraft.world.item.ItemStack stack = jb.getTheItem();
+			return stack != null && !stack.isEmpty();
+		}
+		return false;
 	}
 
 	// ------------------------------------------------------------- 入口：消息
