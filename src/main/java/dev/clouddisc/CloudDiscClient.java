@@ -1,6 +1,6 @@
 package dev.clouddisc;
 
-// import dev.clouddisc.gui.CloudDiscConfigScreen;  // 阶段3 恢复
+import dev.clouddisc.gui.CloudDiscConfigScreen;
 import dev.clouddisc.sync.SyncService;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
