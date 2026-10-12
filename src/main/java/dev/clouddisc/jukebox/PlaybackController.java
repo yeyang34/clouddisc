@@ -731,7 +731,7 @@ public final class PlaybackController {
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
 		// 还原原版行为：屏幕下方显示「正在播放: xxx」（26.2 里是 Minecraft.gui.setNowPlaying(Component) ✓）
-		Minecraft.getInstance().gui.setNowPlaying(
+		Minecraft.getInstance().gui.hud.setNowPlaying(
 				Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
