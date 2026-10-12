@@ -2,6 +2,7 @@ package dev.clouddisc.gui;
 
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
@@ -138,12 +139,12 @@ public class CloudDiscConfigScreen extends Screen {
 		Button save = Button.builder(Component.literal("保存"), b -> {
 			cfg.save();
 			CloudDiscClient.LOGGER.info("[CloudDisc] 配置已保存到磁盘");
-			close();
+			onClose();
 		}).bounds(bx + 2 * (bw + 4), y, bw, 20).build();
 		save.visible = !textSection; // 只读页没有可保存的东西
 		addRenderableWidget(save);
 
-		addRenderableWidget(Button.builder(Component.literal("关闭"), b -> close())
+		addRenderableWidget(Button.builder(Component.literal("关闭"), b -> onClose())
 				.bounds(bx + 3 * (bw + 4), y, bw, 20).build());
 	}
 
@@ -473,7 +474,7 @@ public class CloudDiscConfigScreen extends Screen {
 	@Override
 	public void onClose() {
 		if (this.minecraft != null) {
-			net.minecraft.client.Minecraft.getInstance().setScreen(this.parent);
+			Minecraft.getInstance().setScreenAndShow(this.parent);
 		}
 	}
 }
