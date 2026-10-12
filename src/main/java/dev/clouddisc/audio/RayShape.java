@@ -85,7 +85,7 @@ public final class RayShape {
 		}
 		// ③ 兜底：盒子列表不可用时，用引擎自己的求交（世界坐标 + pos，实测语义正确）
 		try {
-			return shape.raycast(from, to, pos) != null;
+			return shape.clip(from, to, pos) != null;
 		} catch (Throwable t) {
 			return true; // 连兜底都失败：宁可闷一点，也不要静默地"什么都不挡"
 		}

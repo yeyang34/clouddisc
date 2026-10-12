@@ -134,7 +134,7 @@ public final class PlaybackController {
 	private static long now() {
 		ClientLevel world = Minecraft.getInstance().level;
 		// Yarn getTime() == Mojang getGameTime()：只增不减、不受 /time 与 doDaylightCycle 影响
-		return world == null ? 0L : world.getTime();
+		return world == null ? 0L : world.getGameTime();
 	}
 
 	public List<JukeboxSession> sessions() {
@@ -314,7 +314,7 @@ public final class PlaybackController {
 				s.durationMs = m.durMs;
 				if (Protocol.T_ANSWER.equals(m.t) && m.posMs > 0L) {
 					// 【重进服 / 中途加入】必须用对方给出的"内容位置"定位，**不能**用跨客户端刻换算：
-					// 刚进服的客户端 world.getTime() 与房主能差几万刻（实测 -28440 刻、甚至 -1000900ms），
+					// 刚进服的客户端 world.getGameTime() 与房主能差几万刻（实测 -28440 刻、甚至 -1000900ms），
 					// 算出来的位置要么离谱、要么越过文件末尾 —— 表现就是"根本不播放"。
 					s.localStartTick = nowTick - m.posMs / 50L;
 					CloudDiscClient.LOGGER.info("[CloudDisc] 按对方的内容位置定位: {}ms（重进服/中途加入）", m.posMs);

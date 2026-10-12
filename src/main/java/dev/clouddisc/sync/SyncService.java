@@ -79,7 +79,7 @@ public final class SyncService implements PlaybackController.Announcer {
 	public PlaybackController.Decision onWorldEvent(ClientLevel world, BlockPos pos, int eventId, int data) {
 		// 注意：Yarn 的 Level#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
 		// 千万不要用 getTimeOfDay()（会被 /time 改、会被 doDaylightCycle 冻住）。
-		return playback.onWorldEvent(world.getRegistryKey().getValue(), pos, eventId, data, world.getTime());
+		return playback.onWorldEvent(world.getRegistryKey().getValue(), pos, eventId, data, world.getGameTime());
 	}
 
 	/** 来自 {@code UseBlockCallback}：本地玩家右键方块。 */
@@ -102,7 +102,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		if (mc.level == null) {
 			return;
 		}
-		long now = mc.level.getTime();
+		long now = mc.level.getGameTime();
 		// 中途加入时的主动询问：**问到有结果为止**（每 2 秒一次，最多 30 秒）
 		//
 		// 改成这样的原因（实测偶现："退出世界再回来有时不播放，时好时坏"）：
@@ -143,7 +143,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		// 中途加入：原版不会给新来的玩家重发 1010 事件，所以必须自己主动问一轮。
 		// 第一次问可能还没有发现同伴（组播发现要约 2 秒），所以在 +1s / +3s / +10s 各问一次。
 		Minecraft mc = Minecraft.getInstance();
-		long now = mc.level == null ? 0L : mc.level.getTime();
+		long now = mc.level == null ? 0L : mc.level.getGameTime();
 		joinTick = now;
 		queryDone = false;
 		nextQueryTick = now + 20L;
@@ -342,7 +342,7 @@ public final class SyncService implements PlaybackController.Announcer {
 			if (world == null) {
 				return;
 			}
-			playback.onMessage(m, world.getTime());
+			playback.onMessage(m, world.getGameTime());
 		});
 	}
 }

@@ -2,9 +2,9 @@ package dev.clouddisc.audio;
 
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
-import dev.clouddisc.mixin.SoundSystemAccessor;
-import dev.clouddisc.mixin.SourceAccessor;
-import dev.clouddisc.mixin.SourceManagerAccessor;
+// [26.2] accessor 暂缓（Source/Channel 体系变了）
+// [26.2] accessor 暂缓（Source/Channel 体系变了）
+// [26.2] accessor 暂缓（Source/Channel 体系变了）
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.audio.Channel;
@@ -278,19 +278,7 @@ public final class Acoustics {
 			return 0;
 		}
 		try {
-			Map<SoundInstance, Channel.SourceManager> map = ((SoundSystemAccessor) ss).clouddisc$sources();
-			if (map == null) {
-				return 0;
-			}
-			Channel.SourceManager sm = map.get(instance);
-			if (sm == null) {
-				return 0;
-			}
-			Source src = ((SourceManagerAccessor) sm).clouddisc$source();
-			if (src == null) {
-				return 0;
-			}
-			return ((SourceAccessor) src).clouddisc$pointer();
+			return -1; // [26.2] 暂缓：Source/Channel 体系变更，先返回 -1（不影响编译与其它功能）
 		} catch (Throwable t) {
 			return 0;
 		}
@@ -298,7 +286,7 @@ public final class Acoustics {
 
 	private static long currentTick() {
 		Level w = Minecraft.getInstance().level;
-		return w == null ? 0L : w.getTime();
+		return w == null ? 0L : w.getGameTime();
 	}
 
 	// ---------------------------------------------------------------- 每 tick 主入口
@@ -934,7 +922,7 @@ public final class Acoustics {
 
 	/** 镜面反射：{@code dir - 2 (dir·n) n}。 */
 	private static Vec3 reflect(Vec3 dir, Vec3 normal) {
-		double dot = dir.dotProduct(normal) * 2.0;
+		double dot = dir.dot(normal) * 2.0;
 		return new Vec3(dir.x - dot * normal.x, dir.y - dot * normal.y, dir.z - dot * normal.z);
 	}
 
@@ -1117,13 +1105,13 @@ public final class Acoustics {
 	 */
 	private static boolean hitsShape(VoxelShape shape, Vec3 from, Vec3 to, BlockPos pos) {
 		try {
-			AABB bb = shape.getBoundingBox();
+			AABB bb = shape.bounds();
 			boolean fullCube = bb.minX <= 1.0e-3 && bb.minY <= 1.0e-3 && bb.minZ <= 1.0e-3
 					&& bb.maxX >= 1.0 - 1.0e-3 && bb.maxY >= 1.0 - 1.0e-3 && bb.maxZ >= 1.0 - 1.0e-3;
 			if (fullCube) {
 				return true;
 			}
-			if (shape.raycast(from, to, pos) != null) {
+			if (shape.clip(from, to, pos) != null) {
 				return true;
 			}
 			return bb.contains(from) || bb.contains(to);
@@ -1159,11 +1147,11 @@ public final class Acoustics {
 				// 水平射线会撞到唱片机自己或紧贴的方块，于是"露天也会被判成封闭"（实测真凶）。
 				Vec3 from = p.add(d[0] * 0.6, d[1] * 0.6, d[2] * 0.6);
 				Vec3 to = p.add(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0);
-				BlockHitResult hit = world.raycast(new ClipContext(from, to, ClipContext.ShapeType.COLLIDER,
-						ClipContext.FluidHandling.NONE, self));
+				BlockHitResult hit = world.raycast(new ClipContext(from, to, ClipContext.Block.COLLIDER,
+						ClipContext.Fluid.NONE, self));
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
 					open++;
-				} else if (false && hit.position().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
+				} else if (false && hit.getLocation().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
 					// 【0.12.35】只忽略 0.9 格以内的命中：那是脚下的地面 / 紧贴声源的方块（"就地放置"）。
 					// 上一版写成 2.0，结果小房间的墙（常在 1.5~2 格处）也被当成"就地放置"，
 					// 于是小屋里反而完全不闷 —— 实测反馈后收紧到 0.9。
@@ -1208,7 +1196,7 @@ public final class Acoustics {
 			if (len2 < 1.0e-9) {
 				return a;
 			}
-			double t = p.subtract(a).dotProduct(ab) / len2;
+			double t = p.subtract(a).dot(ab) / len2;
 			t = Math.max(0.0, Math.min(1.0, t));
 			return a.add(ab.multiply(t));
 		} catch (Throwable t) {
@@ -1261,7 +1249,7 @@ public final class Acoustics {
 					break;
 				}
 				// 镜面反射（dir - 2(dir·n)n），与追踪器同一公式
-				double d = dir.dotProduct(hit.normal()) * 2.0;
+				double d = dir.dot(hit.normal()) * 2.0;
 				dir = dir.subtract(hit.normal().multiply(d)).normalize();
 				origin = hit.point().add(hit.normal().multiply(0.002));
 			}
