@@ -28,8 +28,7 @@ dependencies {
 
 	// ModMenu 的模组列表入口（仅编译期需要；运行期没装 ModMenu 也不会加载那个类）
 	// ModMenu 只做编译期依赖：直接用本机 26.2 实例里那一份 jar ✓（不打进产物 ✓）
-	// ModMenu 集成暂时搁置：本机 26.2 实例的 mods 里已经找不到 modmenu jar 了 ✗（34 轮时还在 ✓）
-	// 等 modmenu 恢复后，把 compileOnly 指回它、并把 ModMenuIntegration 搬回来即可 ✓
+	compileOnly files("D:/.minecraft/versions/26.2-Fabric 0.19.5/mods/[模组菜单] modmenu-20.0.3.jar")
 
 	// MP3 解码（LGPL-2.1，见 THIRD-PARTY.md）。
 	// 用 Loom 的 include 打成嵌套 jar（META-INF/jars/），不打进主 classpath，
