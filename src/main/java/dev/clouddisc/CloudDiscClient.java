@@ -65,7 +65,7 @@ public final class CloudDiscClient implements ClientModInitializer {
 		//   ② 客户端命令 /clouddisc —— 纯客户端命令，服务器没装任何东西也能用
 		//   ③ ModMenu 的模组列表按钮（装了 ModMenu 才会出现，见 ModMenuIntegration）
 		configKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-				"key.clouddisc.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, "category.clouddisc"));
+				"key.clouddisc.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, net.minecraft.client.KeyMapping.Category.MISC));
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (configKey.consumeClick()) {
 				openConfigScreen(null);

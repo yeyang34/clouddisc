@@ -13,7 +13,7 @@ import net.minecraft.util.RandomSource;
  * 把一次 CloudDisc 播放伪装成一条普通声音实例。
  *
  * <p>实现 {@link SoundInstance}（1.20.1 里<b>没有</b> {@code resolve} / {@code getStream}；
- * 名字分别是 {@code getSoundSet(SoundManager)} 与"由 SoundLoader 取流"），
+ * 名字分别是 {@code resolve(SoundManager)} 与"由 SoundLoader 取流"），
  * 于是 MC 会把它当普通流式声音处理：
  * <ul>
  *   <li>位置 = 唱片机坐标 → 有距离衰减，单声道 PCM 能被 OpenAL 正确空间化</li>
@@ -51,12 +51,12 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public Identifier getId() {
+	public Identifier getIdentifier() {
 		return id;
 	}
 
 	@Override
-	public SoundEventRegistration getSoundSet(SoundManager soundManager) {
+	public net.minecraft.client.sounds.WeighedSoundEvents resolve(SoundManager soundManager) {
 		// 绕过 sounds.json：直接把我们的 Sound 打包成 Set 交回去
 		SoundEventRegistration set = new SoundEventRegistration(getId(), null);
 		set.add(this.sound);
@@ -69,7 +69,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public SoundSource getCategory() {
+	public SoundSource getSource() {
 		return SoundSource.RECORDS;
 	}
 
