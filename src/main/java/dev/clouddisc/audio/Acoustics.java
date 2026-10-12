@@ -10,7 +10,7 @@ import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.audio.Channel;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
-import com.mojang.blaze3d.audio.Source;
+import com.mojang.blaze3d.audio.Channel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ClipContext;
