@@ -90,7 +90,6 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 		return false;
 	}
 
-	@Override
 	public int clouddisc$repeatDelay() {
 		return 0;
 	}

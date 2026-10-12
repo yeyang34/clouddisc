@@ -3,11 +3,11 @@ package dev.clouddisc.server;
 import dev.clouddisc.net.CloudDiscNet;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.api.networking.v1.FriendlyByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.network.PacketByteBuf;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,7 +49,7 @@ public final class CloudDiscServer implements ModInitializer {
 	 * <p>用 {@link WeakHashMap} 做键集合：玩家对象被回收后条目自动消失，
 	 * 因此<b>不需要任何断开连接的回调</b>（少一处 API 依赖，也少一处会失效的地方）。
 	 */
-	private static final Set<ServerPlayerEntity> PARTICIPANTS = Collections.newSetFromMap(new WeakHashMap<>());
+	private static final Set<ServerPlayer> PARTICIPANTS = Collections.newSetFromMap(new WeakHashMap<>());
 
 	/** 只把前几次成功转发打进日志，既不刷屏、又能证明"中继真的在转发"。 */
 	private static int forwardLogCount;
@@ -63,7 +63,7 @@ public final class CloudDiscServer implements ModInitializer {
 			return;
 		}
 
-		ServerPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (server, player, handler, buf, sender) -> {
+		// [26.2] ServerPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (server, player, handler, buf, sender) -> {
 			if (buf.readableBytes() < 1) {
 				return;
 			}
@@ -93,15 +93,15 @@ public final class CloudDiscServer implements ModInitializer {
 			// 改成只认"主动报到过的玩家"这张表：判据完全在我们自己手里，不依赖第三方记账。
 			PARTICIPANTS.add(player);
 			int sent = 0;
-			for (ServerPlayerEntity other : PARTICIPANTS) {
+			for (ServerPlayer other : PARTICIPANTS) {
 				if (other == player || other.isRemoved()) {
 					continue;
 				}
 				try {
-					PacketByteBuf out = PacketByteBufs.create();
+					FriendlyByteBuf out = FriendlyByteBufs.create();
 					out.writeByte(first);
 					out.writeBytes(payload);
-					ServerPlayNetworking.send(other, CloudDiscNet.RELAY, out);
+					// [26.2] ServerPlayNetworking.send(other, CloudDiscNet.RELAY, out);
 					sent++;
 				} catch (Throwable t) {
 					LOGGER.debug("[CloudDisc] 转发给 {} 失败: {}", other.getGameProfile().getName(), t.toString());
@@ -122,12 +122,12 @@ public final class CloudDiscServer implements ModInitializer {
 				CloudDiscNet.RELAY);
 	}
 
-	private static void sendHello(ServerPlayerEntity player) {
+	private static void sendHello(ServerPlayer player) {
 		try {
-			PacketByteBuf ack = PacketByteBufs.create();
+			FriendlyByteBuf ack = FriendlyByteBufs.create();
 			ack.writeByte(CloudDiscNet.TYPE_HELLO);
 			ack.writeByte(CloudDiscNet.CONVENTION_VERSION);
-			ServerPlayNetworking.send(player, CloudDiscNet.RELAY, ack);
+			// [26.2] ServerPlayNetworking.send(player, CloudDiscNet.RELAY, ack);
 		} catch (Throwable t) {
 			LOGGER.debug("[CloudDisc] 应答 {} 失败: {}", player.getGameProfile().getName(), t.toString());
 		}
