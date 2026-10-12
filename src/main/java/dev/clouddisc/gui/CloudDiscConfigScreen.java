@@ -503,6 +503,35 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	@Override
+	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
+		// 【26.2】顶部胶囊标签栏是手绘的（不是控件）→ 必须在这里手动命中判定 ✓
+		try {
+			int tabH = 18, gap = 6;
+			int avail = layRight - layLeft;
+			int[] w = new int[SECTION_COUNT];
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				w[i] = Math.max(24, (avail - gap * (SECTION_COUNT - 1)) / SECTION_COUNT);
+			}
+			int x = layLeft;
+			int y = 52;
+			double mx = event.x();
+			double my = event.y();
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				if (mx >= x && mx < x + w[i] && my >= y && my < y + tabH) {
+					section = i;
+					scroll = 0;
+					rebuildWidgets();
+					CloudDiscClient.LOGGER.info("[CloudDisc] 配置界面：切到第 {} 节", i);
+					return true;
+				}
+				x += w[i] + gap;
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] tab 命中判定异常（已忽略）: {}", t.toString());
+		}
+		return super.mouseClicked(event, doubleClick);
+	}
+
 	public void onClose() {
 		if (this.minecraft != null) {
 			Minecraft.getInstance().setScreenAndShow(this.parent);
