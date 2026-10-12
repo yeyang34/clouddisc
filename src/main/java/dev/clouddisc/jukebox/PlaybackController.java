@@ -14,12 +14,12 @@ import dev.clouddisc.sync.Protocol;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.MusicDiscItem;
+import net.minecraft.world.item.RecordItem;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.sounds.SoundEvent;
-import net.minecraft.network.chat.Text;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.phys.BlockPos;
+import net.minecraft.core.BlockPos;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -735,7 +735,7 @@ public final class PlaybackController {
 		// 我们为了不发出原版声音会取消 1010 事件，顺带把它一起丢掉了。这里按原版的方式补回来：
 		// 同一个方法、同一个时机（真正开声的那一刻），所以观感与原版一致（淡出也由 HUD 自己管）。
 		Minecraft.getInstance().inGameHud.setRecordPlayingOverlay(
-				net.minecraft.network.chat.Text.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
+				net.minecraft.network.chat.Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
 				s.title, positionMs, pipe.playedMs(), streamId, pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
@@ -858,7 +858,7 @@ public final class PlaybackController {
 			return;
 		}
 		Item item = Item.byRawId(h.itemId);
-		if (!(item instanceof MusicDiscItem disc)) {
+		if (!(item instanceof RecordItem disc)) {
 			return;
 		}
 		// 关键：走**原版自己的入口** WorldRenderer#playSong，而不是 world.playSound。

@@ -2,12 +2,12 @@ package dev.clouddisc.jukebox;
 
 import net.minecraft.client.resources.sounds.Sound;
 import net.minecraft.client.resources.sounds.SoundInstance;
-import net.minecraft.client.resources.sounds.SoundManager;
-import net.minecraft.client.resources.sounds.WeightedSoundSet;
+import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.client.resources.sounds.SoundEventRegistration;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.phys.BlockPos;
-import net.minecraft.util.RandomSourceRandom;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.RandomSource;
 
 /**
  * 把一次 CloudDisc 播放伪装成一条普通声音实例。
@@ -56,9 +56,9 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public WeightedSoundSet getSoundSet(SoundManager soundManager) {
+	public SoundEventRegistration getSoundSet(SoundManager soundManager) {
 		// 绕过 sounds.json：直接把我们的 Sound 打包成 Set 交回去
-		WeightedSoundSet set = new WeightedSoundSet(getId(), null);
+		SoundEventRegistration set = new SoundEventRegistration(getId(), null);
 		set.add(this.sound);
 		return set;
 	}

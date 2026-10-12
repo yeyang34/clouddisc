@@ -3,7 +3,7 @@ package dev.clouddisc.mixin;
 import dev.clouddisc.jukebox.StreamRegistry;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.resources.sounds.AudioStream;
+import net.minecraft.client.sounds.AudioStream;
 import net.minecraft.client.resources.sounds.SoundLoader;
 import net.minecraft.resources.ResourceLocation;
 import org.spongepowered.asm.mixin.Mixin;

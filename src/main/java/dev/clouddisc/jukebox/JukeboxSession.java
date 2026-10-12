@@ -3,7 +3,7 @@ package dev.clouddisc.jukebox;
 import dev.clouddisc.audio.AudioPipeline;
 import dev.clouddisc.audio.PcmAudioStream;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.phys.BlockPos;
+import net.minecraft.core.BlockPos;
 
 import java.util.UUID;
 

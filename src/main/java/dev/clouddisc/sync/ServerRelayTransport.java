@@ -3,7 +3,7 @@ package dev.clouddisc.sync;
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.net.CloudDiscNet;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.api.networking.v1.FriendlyByteBufs;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 

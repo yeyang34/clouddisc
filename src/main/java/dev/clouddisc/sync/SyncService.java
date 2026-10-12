@@ -5,11 +5,11 @@ import dev.clouddisc.CloudDiscConfig;
 import dev.clouddisc.jukebox.JukeboxSession;
 import dev.clouddisc.jukebox.PlaybackController;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientWorld;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.InteractionResult;
-import net.minecraft.world.level.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -83,8 +83,8 @@ public final class SyncService implements PlaybackController.Announcer {
 	}
 
 	/** 来自 {@code UseBlockCallback}：本地玩家右键方块。 */
-	public InteractionResult onUseBlock(Player player, Level world, Hand hand, BlockHitResult hit) {
-		if (!world.isClient() || hand != Hand.MAIN_HAND) {
+	public InteractionResult onUseBlock(Player player, Level world, InteractionHand hand, BlockHitResult hit) {
+		if (!world.isClient() || hand != InteractionHand.MAIN_HAND) {
 			return InteractionResult.PASS;
 		}
 		if (!world.getBlockState(hit.getBlockPos()).isOf(Blocks.JUKEBOX)) {

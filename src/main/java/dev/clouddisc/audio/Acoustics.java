@@ -13,7 +13,7 @@ import net.minecraft.client.sounds.SoundManager;
 import com.mojang.blaze3d.audio.Source;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.RaycastContext;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.AABB;
