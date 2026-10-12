@@ -2,8 +2,8 @@ package dev.clouddisc.jukebox;
 
 import dev.clouddisc.audio.AudioPipeline;
 import dev.clouddisc.audio.PcmAudioStream;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.BlockPos;
 
 import java.util.UUID;
 
@@ -51,7 +51,7 @@ public final class JukeboxSession {
 	public boolean originator;
 
 	// 本地播放资源
-	public Identifier streamId;
+	public ResourceLocation streamId;
 	public PcmAudioStream stream;
 	public AudioPipeline pipeline;
 	public CloudDiscSoundInstance instance;
@@ -89,7 +89,7 @@ public final class JukeboxSession {
 	public void dispose() {
 		state = State.DEAD;
 		if (instance != null) {
-			net.minecraft.client.MinecraftClient.getInstance().getSoundManager().stop(instance);
+			net.minecraft.client.Minecraft.getInstance().getSoundManager().stop(instance);
 		}
 		if (streamId != null) {
 			StreamRegistry.remove(streamId);

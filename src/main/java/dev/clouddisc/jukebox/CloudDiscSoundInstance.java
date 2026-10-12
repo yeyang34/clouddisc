@@ -1,13 +1,13 @@
 package dev.clouddisc.jukebox;
 
-import net.minecraft.client.sound.Sound;
-import net.minecraft.client.sound.SoundInstance;
-import net.minecraft.client.sound.SoundManager;
-import net.minecraft.client.sound.WeightedSoundSet;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.random.Random;
+import net.minecraft.client.resources.sounds.Sound;
+import net.minecraft.client.resources.sounds.SoundInstance;
+import net.minecraft.client.resources.sounds.SoundManager;
+import net.minecraft.client.resources.sounds.WeightedSoundSet;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.BlockPos;
+import net.minecraft.util.RandomSourceRandom;
 
 /**
  * 把一次 CloudDisc 播放伪装成一条普通声音实例。
@@ -17,30 +17,30 @@ import net.minecraft.util.math.random.Random;
  * 于是 MC 会把它当普通流式声音处理：
  * <ul>
  *   <li>位置 = 唱片机坐标 → 有距离衰减，单声道 PCM 能被 OpenAL 正确空间化</li>
- *   <li>类别 = {@link SoundCategory#RECORDS} → 跟随"唱片机/音符盒"音量滑块</li>
+ *   <li>类别 = {@link SoundSource#RECORDS} → 跟随"唱片机/音符盒"音量滑块</li>
  *   <li>由原版 {@code SoundManager} 管理 → 暂停、失焦静音、{@code stop(instance)} 全部照常</li>
  * </ul>
  */
 public final class CloudDiscSoundInstance implements SoundInstance {
 	/**
 	 * 与原版唱片对齐：vanilla 用 {@code PositionedSoundInstance.record(...)}，
-	 * 即 {@code SoundCategory.RECORDS} + volume 4.0f + pitch 1.0f + LINEAR 衰减。
+	 * 即 {@code SoundSource.RECORDS} + volume 4.0f + pitch 1.0f + LINEAR 衰减。
 	 */
 	// 【0.12.31】衰减距离 16 → 48 格。
 	// 16 格时远处直通早就衰减到听不见，只剩混响在响，于是离远听得见但没方位、很假。
 	// 48 格时远处仍听得见，而且走的是引擎的距离衰减（带空间定位），方位感正常。
 	private static final int ATTENUATION_DISTANCE = 48;
 
-	private final Identifier id;
+	private final ResourceLocation id;
 	private final Sound sound;
 	private final double x;
 	private final double y;
 	private final double z;
 	private final float volume;
-	private final Random random = Random.create();
+	private final RandomSource random = RandomSource.create();
 
-	public CloudDiscSoundInstance(Identifier streamId, BlockPos pos, float volume) {
-		this.id = new Identifier("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
+	public CloudDiscSoundInstance(ResourceLocation streamId, BlockPos pos, float volume) {
+		this.id = new ResourceLocation("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
 		// 自定义 Sound：FILE + stream=true —— 这就是"流式播放"的开关
 		this.sound = new Sound(streamId.toString(), r -> 1.0F, r -> 1.0F, 1,
 				Sound.RegistrationType.FILE, true, false, ATTENUATION_DISTANCE);
@@ -51,7 +51,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public Identifier getId() {
+	public ResourceLocation getId() {
 		return id;
 	}
 
@@ -69,8 +69,8 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public SoundCategory getCategory() {
-		return SoundCategory.RECORDS;
+	public SoundSource getCategory() {
+		return SoundSource.RECORDS;
 	}
 
 	@Override

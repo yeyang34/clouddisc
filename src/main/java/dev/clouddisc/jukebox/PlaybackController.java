@@ -11,15 +11,15 @@ import dev.clouddisc.disc.DiscName;
 import dev.clouddisc.music.MusicProvider;
 import dev.clouddisc.music.Providers;
 import dev.clouddisc.sync.Protocol;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.item.Item;
-import net.minecraft.item.MusicDiscItem;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.MusicDiscItem;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.network.chat.Text;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.BlockPos;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -132,7 +132,7 @@ public final class PlaybackController {
 	}
 
 	private static long now() {
-		ClientWorld world = MinecraftClient.getInstance().world;
+		ClientLevel world = Minecraft.getInstance().world;
 		// Yarn getTime() == Mojang getGameTime()：只增不减、不受 /time 与 doDaylightCycle 影响
 		return world == null ? 0L : world.getTime();
 	}
@@ -144,7 +144,7 @@ public final class PlaybackController {
 	// ------------------------------------------------------------ 入口：本地
 
 	/** 玩家右键把唱片放进唱片机（客户端预测阶段）。 */
-	public void noteLocalUse(Identifier dim, BlockPos pos, Text itemName) {
+	public void noteLocalUse(ResourceLocation dim, BlockPos pos, Component itemName) {
 		DiscName.SongQuery query = DiscName.parse(itemName, cfg.discNamePrefix);
 		if (query == null) {
 			return;
@@ -208,7 +208,7 @@ public final class PlaybackController {
 		return sessions.size();
 	}
 
-	public Decision onWorldEvent(Identifier dim, BlockPos pos, int eventId, int data, long nowTick) {
+	public Decision onWorldEvent(ResourceLocation dim, BlockPos pos, int eventId, int data, long nowTick) {
 		String dimId = dim.toString();
 		String key = Protocol.key(dimId, pos.asLong());
 
@@ -260,13 +260,13 @@ public final class PlaybackController {
 	 * 前者我们要继续放，后者必须真的停。
 	 */
 	private static boolean recordStillInserted(String dimId, BlockPos pos) {
-		MinecraftClient mc = MinecraftClient.getInstance();
+		Minecraft mc = Minecraft.getInstance();
 		if (mc.world == null || !mc.world.getRegistryKey().getValue().toString().equals(dimId)) {
 			return false;
 		}
-		net.minecraft.block.BlockState state = mc.world.getBlockState(pos);
-		return state.contains(net.minecraft.block.JukeboxBlock.HAS_RECORD)
-				&& state.get(net.minecraft.block.JukeboxBlock.HAS_RECORD);
+		net.minecraft.world.level.block.state.BlockState state = mc.world.getBlockState(pos);
+		return state.contains(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD)
+				&& state.get(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD);
 	}
 
 	// ------------------------------------------------------------- 入口：消息
@@ -548,7 +548,7 @@ public final class PlaybackController {
 		}
 		CloudDiscClient.LOGGER.info("[CloudDisc] 开始解析曲目: provider={} trackId={}", provider.id(), s.trackId);
 		provider.resolve(s.trackId, cfg).whenComplete((track, err) ->
-				MinecraftClient.getInstance().execute(() -> {
+				Minecraft.getInstance().execute(() -> {
 					if (err != null || track == null) {
 						pending.remove(s.key);
 						CloudDiscClient.LOGGER.warn("[CloudDisc] 解析失败 {}:{} -> {}", s.provider, s.trackId, String.valueOf(err));
@@ -620,7 +620,7 @@ public final class PlaybackController {
 						pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
 			}
 			return pipe;
-		}, WORKER).whenComplete((pipe, err) -> MinecraftClient.getInstance().execute(() -> {
+		}, WORKER).whenComplete((pipe, err) -> Minecraft.getInstance().execute(() -> {
 			if (s.state == JukeboxSession.State.DEAD) {
 				if (pipe != null) {
 					pipe.close();
@@ -687,7 +687,7 @@ public final class PlaybackController {
 			}
 			pipe.awaitPrebuffer(cfg.prebufferMs, 15_000L);
 			return pos;
-		}, WORKER).whenComplete((pos, err) -> MinecraftClient.getInstance().execute(() -> {
+		}, WORKER).whenComplete((pos, err) -> Minecraft.getInstance().execute(() -> {
 			if (s.state == JukeboxSession.State.DEAD || pos == null) {
 				return;
 			}
@@ -714,11 +714,11 @@ public final class PlaybackController {
 		// 这两种情况下原版已经响了，而我们随后接上 = **两条音轨同时出声**。
 		// playSong(null, pos) 是原版自己的停止路径：从 playingSongs 摘掉 + SoundManager.stop。
 		try {
-			MinecraftClient.getInstance().worldRenderer.playSong(null, s.pos());
+			Minecraft.getInstance().worldRenderer.playSong(null, s.pos());
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.debug("[CloudDisc] 停原版唱片实例失败（不影响我们播放）: {}", t.toString());
 		}
-		Identifier streamId = StreamRegistry.nextId();
+		ResourceLocation streamId = StreamRegistry.nextId();
 		PcmAudioStream stream = new PcmAudioStream(pipe.ring(), 150L, pipe::close);
 		StreamRegistry.put(streamId, stream);
 		CloudDiscSoundInstance instance = new CloudDiscSoundInstance(streamId, s.pos(), cfg.jukeboxVolume);
@@ -728,14 +728,14 @@ public final class PlaybackController {
 		s.startedTick = now();
 		s.msAtStart = positionMs;
 		// 交给原版声音系统：定位、音量类别、停止逻辑全部沿用原版
-		MinecraftClient.getInstance().getSoundManager().play(instance);
+		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
 		// 还原原版行为：屏幕下方显示"正在播放: xxx"。
 		// 原版这一句在 WorldRenderer#playSong 里 —— inGameHud.setRecordPlayingOverlay(item.getDescription())；
 		// 我们为了不发出原版声音会取消 1010 事件，顺带把它一起丢掉了。这里按原版的方式补回来：
 		// 同一个方法、同一个时机（真正开声的那一刻），所以观感与原版一致（淡出也由 HUD 自己管）。
-		MinecraftClient.getInstance().inGameHud.setRecordPlayingOverlay(
-				net.minecraft.text.Text.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
+		Minecraft.getInstance().inGameHud.setRecordPlayingOverlay(
+				net.minecraft.network.chat.Text.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
 				s.title, positionMs, pipe.playedMs(), streamId, pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
@@ -852,8 +852,8 @@ public final class PlaybackController {
 
 	/** 等待窗口内没人认领 → 把原版唱片声补上（会晚一点点，但总比一直静音好）。 */
 	private void fallbackVanilla(Held h) {
-		MinecraftClient mc = MinecraftClient.getInstance();
-		ClientWorld world = mc.world;
+		Minecraft mc = Minecraft.getInstance();
+		ClientLevel world = mc.world;
 		if (world == null || !world.getRegistryKey().getValue().toString().equals(h.dim)) {
 			return;
 		}

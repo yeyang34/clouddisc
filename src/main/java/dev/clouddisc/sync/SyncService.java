@@ -76,7 +76,7 @@ public final class SyncService implements PlaybackController.Announcer {
 	// ------------------------------------------------------------ 事件入口
 
 	/** 来自 {@code ClientWorldMixin}：原版世界事件 1010/1011。 */
-	public PlaybackController.Decision onWorldEvent(ClientWorld world, BlockPos pos, int eventId, int data) {
+	public PlaybackController.Decision onWorldEvent(ClientLevel world, BlockPos pos, int eventId, int data) {
 		// 注意：Yarn 的 Level#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
 		// 千万不要用 getTimeOfDay()（会被 /time 改、会被 doDaylightCycle 冻住）。
 		return playback.onWorldEvent(world.getRegistryKey().getValue(), pos, eventId, data, world.getTime());
@@ -338,7 +338,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		}
 		// 通道线程 → 客户端线程
 		Minecraft.getInstance().execute(() -> {
-			ClientWorld world = Minecraft.getInstance().world;
+			ClientLevel world = Minecraft.getInstance().world;
 			if (world == null) {
 				return;
 			}

@@ -5,7 +5,7 @@ import dev.clouddisc.net.CloudDiscNet;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.FriendlyByteBuf;
 
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
