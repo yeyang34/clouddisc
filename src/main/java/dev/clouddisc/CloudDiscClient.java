@@ -40,6 +40,10 @@ public final class CloudDiscClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		// 【26.2】注册中继通道的载荷类型（客户端 → 服务端 ✓ 用 CustomPacketPayload 新体系 ✓）
+		net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.serverboundPlay()
+				.register(dev.clouddisc.net.CloudDiscRelayPayload.TYPE, dev.clouddisc.net.CloudDiscRelayPayload.CODEC);
+
 		config = CloudDiscConfig.get();
 		sync = new SyncService(config);
 		sync.init();
