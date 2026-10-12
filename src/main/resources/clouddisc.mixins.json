@@ -11,7 +11,9 @@
     "ChannelHandleAccessor",
     "SourceMixin",
     "SoundSystemMixin",
-    "SoundLoaderMixin"
+    "SoundLoaderMixin",
+    "JukeboxSongPlayerAccessor",
+    "JukeboxLibMixin"
   ],
   "injectors": {
     "defaultRequire": 0
