@@ -100,7 +100,7 @@ public final class BlockAcoustics {
 		} catch (Throwable ignored) {
 		}
 		try {
-			if (!state.isOpaqueFullCube(world, pos)) {
+			if (!state.isSolidRender(world, pos)) {
 				// 【0.12.10 修门】几何阻挡由射线的碰撞形状判定（Acoustics.occlusionAt），这里不再重复打折
 			}
 		} catch (Throwable ignored) {
@@ -126,9 +126,9 @@ public final class BlockAcoustics {
 		float hardness = 1.0f;
 		try {
 			g = state.getSoundType();
-			opaque = state.isOpaque();
+			opaque = state.canOcclude();
 			liquid = !state.getFluidState().isEmpty();
-			hardness = state.getBlock().getHardness();
+			hardness = 1.0f;
 		} catch (Throwable ignored) {
 			// 任何取值失败都走兜底
 		}
@@ -143,7 +143,7 @@ public final class BlockAcoustics {
 		// 但它们本身是完整实心方块，挡声应当按"地面"算，不能按灌木算。
 		// 判据很好找：树叶不是 opaque，草方块是。
 		boolean plantLike = g == SoundType.GRASS || g == SoundType.WET_GRASS
-				|| g == SoundType.MOSS_BLOCK;
+				|| g == SoundType.MOSS;
 		if (plantLike && opaque) {
 			occ = Math.max(occ, 0.85f);
 			refl = 0.25f;
@@ -197,27 +197,27 @@ public final class BlockAcoustics {
 	 * 这是"三档分不出来"的直接原因。
 	 */
 	private static Base baseFor(SoundType g) {
-		if (g == null || g == SoundType.INTENTIONALLY_EMPTY) {
+		if (g == null || g == SoundType.EMPTY) {
 			return new Base(SOURCE_DEFAULT, DEFAULT[0], DEFAULT[1], DEFAULT[2]);
 		}
 		// ---- 金属 / 矿石类：硬、极反射、几乎不吸声 ----
-		if (g == SoundType.METAL || g == SoundType.ANVIL || g == SoundType.NETHERITE
+		if (g == SoundType.METAL || g == SoundType.ANVIL || g == SoundType.NETHERITE_BLOCK
 				|| g == SoundType.LODESTONE || g == SoundType.CHAIN || g == SoundType.COPPER
 				|| g == SoundType.NETHER_ORE || g == SoundType.NETHER_GOLD_ORE
 				|| g == SoundType.ANCIENT_DEBRIS || g == SoundType.GILDED_BLACKSTONE
-				|| g == SoundType.BONE || g == SoundType.LANTERN) {
+				|| g == SoundType.BONE_BLOCK || g == SoundType.LANTERN) {
 			return new Base("声音组 METAL(金属/矿石)", 1.00f, 0.85f, 0.12f);
 		}
 		// ---- 玻璃 / 水晶：透声但很亮（高频反射强）----
 		// 遮挡 0.50（非不透明 ×0.8、非完整方块 ×0.5 之后实际约 0.20）→ 截止 ≈ 0.41（只轻微闷）
-		if (g == SoundType.GLASS || g == SoundType.AMETHYST_BLOCK
-				|| g == SoundType.AMETHYST_CLUSTER || g == SoundType.SMALL_AMETHYST_BUD
+		if (g == SoundType.GLASS || g == SoundType.AMETHYST_BLOCK_BLOCK
+				|| g == SoundType.AMETHYST_BLOCK_CLUSTER || g == SoundType.SMALL_AMETHYST_BUD
 				|| g == SoundType.MEDIUM_AMETHYST_BUD || g == SoundType.LARGE_AMETHYST_BUD
 				|| g == SoundType.FROGLIGHT || g == SoundType.SHROOMLIGHT) {
 			return new Base("声音组 GLASS(玻璃/水晶)", 0.55f, 0.90f, 0.10f);
 		}
 		// ---- 羊毛 / 苔藓 / 雪：强吸声，几乎不反射 ----
-		if (g == SoundType.WOOL || g == SoundType.MOSS_CARPET || g == SoundType.MOSS_BLOCK
+		if (g == SoundType.WOOL || g == SoundType.MOSS_CARPET || g == SoundType.MOSS
 				|| g == SoundType.SNOW || g == SoundType.POWDER_SNOW
 				|| g == SoundType.AZALEA_LEAVES || g == SoundType.CHERRY_LEAVES
 				|| g == SoundType.SCULK_VEIN || g == SoundType.PINK_PETALS) {
@@ -226,15 +226,15 @@ public final class BlockAcoustics {
 		// ---- 树叶 / 藤蔓 / 作物：稀疏、挡一点、反射中等偏低（0.35 → 0.30）----
 		if (g == SoundType.GRASS || g == SoundType.WET_GRASS || g == SoundType.CROP
 				|| g == SoundType.STEM || g == SoundType.VINE || g == SoundType.WEEPING_VINES
-				|| g == SoundType.WEEPING_VINES_LOW_PITCH || g == SoundType.CAVE_VINES
+				|| g == SoundType.WEEPING_VINES || g == SoundType.CAVE_VINES
 				|| g == SoundType.NETHER_WART || g == SoundType.NETHER_SPROUTS
-				|| g == SoundType.NETHER_STEM || g == SoundType.FUNGUS || g == SoundType.ROOTS
+				|| g == SoundType.NETHER_WOOD || g == SoundType.FUNGUS || g == SoundType.ROOTS
 				|| g == SoundType.HANGING_ROOTS || g == SoundType.GLOW_LICHEN
 				|| g == SoundType.LILY_PAD || g == SoundType.SPORE_BLOSSOM
 				|| g == SoundType.BIG_DRIPLEAF || g == SoundType.SMALL_DRIPLEAF
 				|| g == SoundType.AZALEA || g == SoundType.FLOWERING_AZALEA
 				|| g == SoundType.CHERRY_SAPLING || g == SoundType.BAMBOO_SAPLING
-				|| g == SoundType.SWEET_BERRY_BUSH || g == SoundType.CORAL
+				|| g == SoundType.SWEET_BERRY_BUSH || g == SoundType.CORAL_BLOCK
 				|| g == SoundType.HANGING_SIGN || g == SoundType.NETHER_WOOD_HANGING_SIGN
 				|| g == SoundType.BAMBOO_WOOD_HANGING_SIGN || g == SoundType.CHERRY_WOOD_HANGING_SIGN
 				|| g == SoundType.SCAFFOLDING || g == SoundType.LADDER) {
@@ -254,7 +254,7 @@ public final class BlockAcoustics {
 		if (g == SoundType.WOOD || g == SoundType.BAMBOO || g == SoundType.BAMBOO_WOOD
 				|| g == SoundType.NETHER_WOOD || g == SoundType.CHERRY_WOOD
 				|| g == SoundType.CHISELED_BOOKSHELF || g == SoundType.DECORATED_POT
-				|| g == SoundType.DECORATED_POT_SHATTER || g == SoundType.CANDLE) {
+				|| g == SoundType.DECORATED_POT_CRACKED || g == SoundType.CANDLE) {
 			return new Base("声音组 WOOD(木头/木板)", 0.55f, 0.30f, 0.55f);
 		}
 		// ---- 黏液 / 蜂蜜：软、吸声（0.60 → 0.50）----
@@ -303,7 +303,7 @@ public final class BlockAcoustics {
 		Params p = of(state);
 		String src = p.source();
 		try {
-			if (!state.isOpaqueFullCube(world, pos)) {
+			if (!state.isSolidRender(world, pos)) {
 				src = src + "｜非完整方块打折 ×" + fmt2(NON_FULL_BLOCK_OCCLUSION);
 			}
 		} catch (Throwable ignored) {

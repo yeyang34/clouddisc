@@ -799,7 +799,7 @@ public final class Acoustics {
 			double totalDist = 0.0;
 
 			for (int b = 0; b < REVERB_BOUNCES; b++) {
-				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.offset(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
 
 				// 【0.12.56】接收球判定（房间声学标准做法，用户提出的思路）：
@@ -1225,7 +1225,7 @@ public final class Acoustics {
 			Vec3 dir = new Vec3(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
 			Vec3 origin = ear;
 			for (int b = 0; b < 3; b++) {
-				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.offset(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit;
 				try {
 					hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
@@ -1323,7 +1323,7 @@ public final class Acoustics {
 			Vec3 v = axis.cross(u).normalize();
 			int idx = ((sx > 0 ? 1 : 0) << 2) | ((sy > 0 ? 1 : 0) << 1) | (sz > 0 ? 1 : 0);
 			double ang = idx * (Math.PI / 4.0);
-			return u.multiply(Math.cos(ang)).add(v.multiply(Math.sin(ang)));
+			return u.scale(Math.cos(ang)).add(v.scale(Math.sin(ang)));
 		} catch (Throwable t) {
 			return new Vec3(sx, sy, sz);
 		}
@@ -1364,7 +1364,7 @@ public final class Acoustics {
 					continue;
 				}
 				for (int i = 0; i < 6; i++) {
-					BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+					BlockPos n = p.offset(DX[i], DY[i], DZ[i]);
 					if (dist.containsKey(n)) {
 						continue;
 					}
@@ -1485,7 +1485,7 @@ public final class Acoustics {
 				continue;
 			}
 			for (int i = 0; i < 6; i++) {
-				BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+				BlockPos n = p.offset(DX[i], DY[i], DZ[i]);
 				if (dist.containsKey(n)) {
 					continue;
 				}
