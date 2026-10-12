@@ -9,7 +9,8 @@
     "SourceAccessor",
     "SoundSystemAccessor",
     "SourceMixin",
-    "SoundSystemMixin"
+    "SoundSystemMixin",
+    "SoundLoaderMixin"
   ],
   "injectors": {
     "defaultRequire": 0
