@@ -8,7 +8,8 @@
     "ChatHudMixin",
     "SourceAccessor",
     "SoundSystemAccessor",
-    "SourceMixin"
+    "SourceMixin",
+    "SoundSystemMixin"
   ],
   "injectors": {
     "defaultRequire": 0
