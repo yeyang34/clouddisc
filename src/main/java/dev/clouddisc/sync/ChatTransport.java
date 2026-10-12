@@ -95,7 +95,7 @@ public final class ChatTransport implements Transport {
 		mc.execute(() -> {
 			ClientPacketListener h = mc.getConnection();
 			if (h != null) {
-				h.sendChatMessage(line);
+				h.sendChat(line);
 			}
 		});
 	}
