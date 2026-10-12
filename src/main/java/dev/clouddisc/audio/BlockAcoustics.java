@@ -22,7 +22,7 @@ import java.util.Map;
  *
  * <h2>怎么推的</h2>
  * <ol>
- *   <li><b>基础值取"方块声音组"</b>（{@link BlockState#getSoundGroup()}，即 {@link SoundType}
+ *   <li><b>基础值取"方块声音组"</b>（{@link BlockState#getSoundType()}，即 {@link SoundType}
  *       的那些单例：石/木/羊毛/玻璃/金属…）。理由是：声音组本来就是"这个方块听起来像什么材质"
  *       的官方分类，用它当材质类别最省事、也最不容易跑偏。</li>
  *   <li><b>再按几何打折</b>：{@link BlockState#isOpaqueFullCube} 为假（楼梯/栅栏/玻璃板…）→
@@ -101,7 +101,7 @@ public final class BlockAcoustics {
 				return 0.0f;
 			}
 		} catch (Throwable ignored) {
-		}		if (!state.isOpaqueFullCube(world, pos)) {
+				if (!state.isOpaqueFullCube(world, pos)) {
 				// 【0.12.10 修门】原来这里对"不是完整方块"再打 0.5 折 -> 关着的门只有 0.22，跟没挡一样。
 				// 现在几何阻挡由射线的碰撞形状判定（Acoustics.occlusionAt），这里不再重复打折。
 				// occ 保持不变（刻意留空，方便日后回退）
@@ -128,7 +128,7 @@ public final class BlockAcoustics {
 		boolean liquid = false;
 		float hardness = 1.0f;
 		try {
-			g = state.getSoundGroup();
+			g = state.getSoundType();
 			opaque = state.isOpaque();
 			liquid = !state.getFluidState().isEmpty();
 			hardness = state.getBlock().getHardness();
