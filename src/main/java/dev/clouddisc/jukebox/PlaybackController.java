@@ -730,13 +730,9 @@ public final class PlaybackController {
 		// 交给原版声音系统：定位、音量类别、停止逻辑全部沿用原版
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
-		// 还原原版行为：屏幕下方显示"正在播放: xxx"。
-		// 原版这一句在 WorldRenderer#playSong 里 —— inGameHud.setNowPlaying( /* [26.2] 改名 */item.getDescription())；
-		// 我们为了不发出原版声音会取消 1010 事件，顺带把它一起丢掉了。这里按原版的方式补回来：
-		// [26.2] HUD 提示待适配: 		// 同一个方法、同一个时机（真正开声的那一刻），所以观感与原版一致（淡出也由 HUD 自己管）。
-		// [26.2] HUD 提示待适配: 		 [26.2] HUD 待适配 —— 		Minecraft.getInstance().inGameHud.setNowPlaying(  [26.2] 改名
-		// [26.2] HUD 提示待适配: 
-		// [26.2] HUD 提示待适配: 				// [26.2] HUD 续行一并注释 —— 				net.minecraft.network.chat.Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
+		// 还原原版行为：屏幕下方显示「正在播放: xxx」（26.2 里是 Minecraft.gui.setNowPlaying(Component) ✓）
+		Minecraft.getInstance().gui.setNowPlaying(
+				Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
 				s.title, positionMs, pipe.playedMs(), streamId, pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
