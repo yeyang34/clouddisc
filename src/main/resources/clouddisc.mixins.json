@@ -5,7 +5,9 @@
   "compatibilityLevel": "JAVA_17",
   "client": [
     "ClientWorldMixin",
-    "ChatHudMixin"
+    "ChatHudMixin",
+    "SourceAccessor",
+    "SoundSystemAccessor"
   ],
   "injectors": {
     "defaultRequire": 0
