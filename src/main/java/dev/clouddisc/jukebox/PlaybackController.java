@@ -908,7 +908,6 @@ public final class PlaybackController {
 			CloudDiscClient.LOGGER.debug("[CloudDisc] 原版唱片回落失败（不影响其它功能）: {}", t.toString());
 		}
 	}
-	}
 
 	private void stopQuiet(JukeboxSession s) {
 		sessions.remove(s.key);
