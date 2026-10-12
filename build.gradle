@@ -1,5 +1,5 @@
 plugins {
-	id 'fabric-loom' version '1.18.4'
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
 	id 'maven-publish'
 }
 
@@ -22,9 +22,9 @@ repositories {
 
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings loom.officialMojangMappings()
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	// 26.2 起游戏自带官方名 → 不需要 mappings ✓（官方示例工程也没有这一行 ✓）
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	// ModMenu 的模组列表入口（仅编译期需要；运行期没装 ModMenu 也不会加载那个类）
 	// modCompileOnly modmenu —— 26.2 版待查，先不用
@@ -43,12 +43,12 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 17
+	it.options.release = 25
 	it.options.encoding = "UTF-8"
 }
 
 java {
-	sourceCompatibility = JavaVersion.toVersion(25)
-	targetCompatibility = JavaVersion.toVersion(25)
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
 	withSourcesJar()
 }
