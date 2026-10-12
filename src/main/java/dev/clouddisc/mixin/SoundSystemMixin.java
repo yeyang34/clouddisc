@@ -10,6 +10,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * 物理声效的两个引擎侧挂点（26.2 版，目标从 SoundManager 改为 {@code SoundEngine}）。
@@ -26,7 +27,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(SoundEngine.class)
 public class SoundSystemMixin {
 	@Inject(method = "play", at = @At("HEAD"))
-	private void clouddisc$mark(SoundInstance sound, CallbackInfo ci) {
+	private void clouddisc$mark(SoundInstance sound, CallbackInfoReturnable<SoundEngine.PlayResult> cir) {
 		try {
 			Acoustics.markNextOwnSource(sound instanceof CloudDiscSoundInstance);
 		} catch (Throwable t) {
