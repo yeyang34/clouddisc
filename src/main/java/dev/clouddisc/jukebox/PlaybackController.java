@@ -144,7 +144,7 @@ public final class PlaybackController {
 	// ------------------------------------------------------------ 入口：本地
 
 	/** 玩家右键把唱片放进唱片机（客户端预测阶段）。 */
-	public void noteLocalUse(ResourceLocation dim, BlockPos pos, Component itemName) {
+	public void noteLocalUse(Identifier dim, BlockPos pos, Component itemName) {
 		DiscName.SongQuery query = DiscName.parse(itemName, cfg.discNamePrefix);
 		if (query == null) {
 			return;
@@ -208,7 +208,7 @@ public final class PlaybackController {
 		return sessions.size();
 	}
 
-	public Decision onWorldEvent(ResourceLocation dim, BlockPos pos, int eventId, int data, long nowTick) {
+	public Decision onWorldEvent(Identifier dim, BlockPos pos, int eventId, int data, long nowTick) {
 		String dimId = dim.toString();
 		String key = Protocol.key(dimId, pos.asLong());
 
@@ -718,7 +718,7 @@ public final class PlaybackController {
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.debug("[CloudDisc] 停原版唱片实例失败（不影响我们播放）: {}", t.toString());
 		}
-		ResourceLocation streamId = StreamRegistry.nextId();
+		Identifier streamId = StreamRegistry.nextId();
 		PcmAudioStream stream = new PcmAudioStream(pipe.ring(), 150L, pipe::close);
 		StreamRegistry.put(streamId, stream);
 		CloudDiscSoundInstance instance = new CloudDiscSoundInstance(streamId, s.pos(), cfg.jukeboxVolume);

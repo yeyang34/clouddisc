@@ -31,7 +31,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	// 48 格时远处仍听得见，而且走的是引擎的距离衰减（带空间定位），方位感正常。
 	private static final int ATTENUATION_DISTANCE = 48;
 
-	private final ResourceLocation id;
+	private final Identifier id;
 	private final Sound sound;
 	private final double x;
 	private final double y;
@@ -39,8 +39,8 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	private final float volume;
 	private final RandomSource random = RandomSource.create();
 
-	public CloudDiscSoundInstance(ResourceLocation streamId, BlockPos pos, float volume) {
-		this.id = new ResourceLocation("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
+	public CloudDiscSoundInstance(Identifier streamId, BlockPos pos, float volume) {
+		this.id = new Identifier("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
 		// 自定义 Sound：FILE + stream=true —— 这就是"流式播放"的开关
 		this.sound = new Sound(streamId.toString(), r -> 1.0F, r -> 1.0F, 1,
 				Sound.RegistrationType.FILE, true, false, ATTENUATION_DISTANCE);
@@ -51,7 +51,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return id;
 	}
 

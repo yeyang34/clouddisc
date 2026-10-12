@@ -51,7 +51,7 @@ public final class JukeboxSession {
 	public boolean originator;
 
 	// 本地播放资源
-	public ResourceLocation streamId;
+	public Identifier streamId;
 	public PcmAudioStream stream;
 	public AudioPipeline pipeline;
 	public CloudDiscSoundInstance instance;
