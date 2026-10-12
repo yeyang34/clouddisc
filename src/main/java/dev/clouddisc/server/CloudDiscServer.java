@@ -82,7 +82,7 @@ public final class CloudDiscServer implements ModInitializer {
 					sendHello(player);
 					if (firstTime) {
 						LOGGER.info("[CloudDisc] {} 接入同步中继（当前 {} 人；对端约定版本 {}，本端 {}）",
-								player.getGameProfile().getName(), PARTICIPANTS.size(),
+								player.getName().getString(), PARTICIPANTS.size(),
 								clientVersion, CloudDiscNet.CONVENTION_VERSION);
 					}
 					return;
@@ -99,13 +99,13 @@ public final class CloudDiscServer implements ModInitializer {
 						ServerPlayNetworking.send(other, new CloudDiscRelayPayload(raw));
 						sent++;
 					} catch (Throwable t) {
-						LOGGER.debug("[CloudDisc] 转发给 {} 失败: {}", other.getGameProfile().getName(), t.toString());
+						LOGGER.debug("[CloudDisc] 转发给 {} 失败: {}", other.getName().getString(), t.toString());
 					}
 				}
 				if (sent > 0 && forwardLogCount < 5) {
 					forwardLogCount++;
 					LOGGER.info("[CloudDisc] 已把 {} 的同步数据转发给 {} 人（参与者共 {} 人）",
-							player.getGameProfile().getName(), sent, PARTICIPANTS.size());
+							player.getName().getString(), sent, PARTICIPANTS.size());
 				}
 			} catch (Throwable t) {
 				LOGGER.debug("[CloudDisc] 中继接收处理异常（已忽略）: {}", t.toString());
@@ -121,7 +121,7 @@ public final class CloudDiscServer implements ModInitializer {
 			ServerPlayNetworking.send(player, new CloudDiscRelayPayload(
 					new byte[] { (byte) CloudDiscNet.TYPE_HELLO, (byte) CloudDiscNet.CONVENTION_VERSION }));
 		} catch (Throwable t) {
-			LOGGER.debug("[CloudDisc] 应答 {} 失败: {}", player.getGameProfile().getName(), t.toString());
+			LOGGER.debug("[CloudDisc] 应答 {} 失败: {}", player.getName().getString(), t.toString());
 		}
 	}
 }

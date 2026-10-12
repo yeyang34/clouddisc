@@ -26,7 +26,7 @@ public record CloudDiscRelayPayload(byte[] data) implements CustomPacketPayload 
 	public static final Identifier CHANNEL = Identifier.fromNamespaceAndPath("clouddisc", "relay");
 
 	public static final CustomPacketPayload.Type<CloudDiscRelayPayload> TYPE =
-			CustomPacketPayload.createType("clouddisc:relay");
+			new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("clouddisc", "relay"));
 
 	/** 编解码：直接读写一个 byte[]（MC 的 FriendlyByteBuf 自带 writeByteArray/readByteArray ✓） */
 	public static final StreamCodec<FriendlyByteBuf, CloudDiscRelayPayload> CODEC =
