@@ -852,23 +852,10 @@ public final class PlaybackController {
 
 	/** 等待窗口内没人认领 → 把原版唱片声补上（会晚一点点，但总比一直静音好）。 */
 	private void fallbackVanilla(Held h) {
-		Minecraft mc = Minecraft.getInstance();
-		ClientLevel world = mc.level;
-		if (world == null || !world.dimension().location().toString().equals(h.dim)) {
-			return;
-		}
-		Item item = Item.byId(h.itemId);
-		if (!(item false /* [26.2] 唱片物品体系变更 */)) {
-			return;
-		}
-		// 关键：走**原版自己的入口** WorldRenderer#playSong，而不是 world.playSound。
-		// 差别很大：
-		//   · playSong 会把它登记进 playingSongs（原版记账表）→ 之后能被原版/我们停掉、
-		//     HUD 会显示曲名、鹦鹉会跳舞；
-		//   · 以前用 world.playSound 放的是"野生声音"，没有任何人能停它 ——
-		//     等我们这边真接上时，就变成**两条音轨同时响**（实测 bug：有时候会卡出原版的音乐）。
-		mc.levelRenderer.playSong(disc.getSound(), h.pos);
-		CloudDiscClient.LOGGER.debug("[CloudDisc] 无人认领，回落原版唱片声 @ {}（走原版 playSong，可被接管时停掉）", h.pos);
+		// 【26.2 移植】原版唱片回落路径待适配：
+		//   26.2 的唱片体系改成了 JukeboxSong / JukeboxSongPlayer（ItemStack 上不再有 RecordItem），
+		//   LevelRenderer 的 playSong 也改名了。阶段 4 用 JukeboxSongPlayer 恢复这条回落路径。
+		return;
 	}
 
 	private void stopQuiet(JukeboxSession s) {

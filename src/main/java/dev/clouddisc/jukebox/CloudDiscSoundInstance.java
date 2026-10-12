@@ -42,7 +42,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	public CloudDiscSoundInstance(Identifier streamId, BlockPos pos, float volume) {
 		this.id = Identifier.fromNamespaceAndPath("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
 		// 自定义 Sound：FILE + stream=true —— 这就是"流式播放"的开关
-		this.sound = new Sound(streamId.toString(), r -> 1.0F, r -> 1.0F, 1,
+		this.sound = new Sound(streamId, r -> 1.0F, r -> 1.0F, 1,
 				net.minecraft.client.resources.sounds.Sound.Type.FILE, true, false, ATTENUATION_DISTANCE);
 		this.x = pos.getX() + 0.5;
 		this.y = pos.getY() + 0.5;
@@ -58,8 +58,10 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	@Override
 	public net.minecraft.client.sounds.WeighedSoundEvents resolve(SoundManager soundManager) {
 		// 绕过 sounds.json：直接把我们的 Sound 打包成 Set 交回去
-		SoundEventRegistration set = new SoundEventRegistration(java.util.List.of(sound), false, null);
-		set.add(this.sound);
+				// 绕过 sounds.json：自己装一份只含本条 Sound 的注册表（26.2 里 resolve 返回 WeighedSoundEvents）
+		net.minecraft.client.sounds.WeighedSoundEvents set =
+				new net.minecraft.client.sounds.WeighedSoundEvents(id, null);
+		set.addSound(this.sound);
 		return set;
 	}
 
@@ -72,9 +74,14 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	public SoundSource getSource() {
 		return SoundSource.RECORDS;
 	}
+	@Override
+	public int getDelay() {
+		return 0;
+	}
+
 
 	@Override
-	public boolean isRepeatable() {
+	public boolean isLooping() {
 		return false;
 	}
 

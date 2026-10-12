@@ -39,7 +39,7 @@ public final class PcmAudioStream implements AudioStream {
 	}
 
 	@Override
-	public ByteBuffer getBuffer(int size) throws IOException {
+	public ByteBuffer read(int size) throws IOException {
 		if (direct == null || direct.capacity() < size) {
 			direct = ByteBuffer.allocateDirect(size);
 			scratch = new byte[size];
