@@ -3,9 +3,9 @@ package dev.clouddisc.sync;
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.net.CloudDiscNet;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.PacketByteBuf;
+import net.fabricmc.fabric.api.networking.v1.FriendlyByteBufs;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.FriendlyByteBuf;
 
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
@@ -34,7 +34,7 @@ public final class ServerRelayTransport implements Transport {
 	private volatile int helloAttempts;
 
 	public ServerRelayTransport() {
-		ClientPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (client, handler, buf, sender) -> {
+		ClientPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (payload, context) -> { /* [26.2] 新 API 形态，待阶段4适配 */
 			if (buf.readableBytes() < 1) {
 				return;
 			}
@@ -76,14 +76,14 @@ public final class ServerRelayTransport implements Transport {
 		if (isReady() || helloAttempts >= MAX_HELLO_ATTEMPTS) {
 			return;
 		}
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.getNetworkHandler() == null) {
 			return;
 		}
 		helloAttempts++;
 		client.execute(() -> {
 			try {
-				PacketByteBuf buf = PacketByteBufs.create();
+				FriendlyByteBuf buf = FriendlyByteBufs.create();
 				buf.writeByte(CloudDiscNet.TYPE_HELLO);
 				buf.writeByte(CloudDiscNet.CONVENTION_VERSION);
 				ClientPlayNetworking.send(CloudDiscNet.RELAY, buf);
@@ -104,10 +104,10 @@ public final class ServerRelayTransport implements Transport {
 			return;
 		}
 		byte[] json = Protocol.toBytes(msg);
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> {
 			try {
-				PacketByteBuf buf = PacketByteBufs.create();
+				FriendlyByteBuf buf = FriendlyByteBufs.create();
 				buf.writeByte(CloudDiscNet.TYPE_DATA);
 				buf.writeBytes(json);
 				ClientPlayNetworking.send(CloudDiscNet.RELAY, buf);
