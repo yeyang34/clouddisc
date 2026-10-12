@@ -261,7 +261,7 @@ public final class PlaybackController {
 	 */
 	private static boolean recordStillInserted(String dimId, BlockPos pos) {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null || !mc.level.dimension().toString().equals(dimId)) {
+		if (mc.level == null || !mc.level.dimension().identifier().toString().equals(dimId)) {
 			return false;
 		}
 		net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(pos);
