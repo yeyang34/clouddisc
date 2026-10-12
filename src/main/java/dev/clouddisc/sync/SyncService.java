@@ -94,7 +94,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		if (stack.isEmpty()) {
 			return InteractionResult.PASS;
 		}
-		playback.noteLocalUse(world.dimension().location(), hit.getBlockPos(), stack.getName());
+		playback.noteLocalUse(world.dimension().location(), hit.getBlockPos(), stack.getHoverName());
 		return InteractionResult.PASS;
 	}
 

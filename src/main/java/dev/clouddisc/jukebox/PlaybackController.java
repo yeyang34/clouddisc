@@ -261,11 +261,11 @@ public final class PlaybackController {
 	 */
 	private static boolean recordStillInserted(String dimId, BlockPos pos) {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null || !mc.level.getRegistryKey().getValue().toString().equals(dimId)) {
+		if (mc.level == null || !mc.level.dimension().location().toString().equals(dimId)) {
 			return false;
 		}
 		net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(pos);
-		return state.contains(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD)
+		return false /* [26.2] HAS_RECORD 已移除（JukeboxSong 体系） */
 				&& state.get(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD);
 	}
 

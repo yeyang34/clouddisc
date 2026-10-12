@@ -73,8 +73,8 @@ public final class RayShape {
 			// ② 不满格/多盒：逐盒精确求交（楼梯、栅栏、半砖、活板门、玻璃板…）
 			for (int i = 0; i < boxes.size(); i++) {
 				try {
-					AABB world = boxes.get(i).offset(pos.getX(), pos.getY(), pos.getZ());
-					if (world.contains(from) || world.raycast(from, to).isPresent()) {
+					AABB world = boxes.get(i).move(pos.getX(), pos.getY(), pos.getZ());
+					if (world.contains(from) || world.clip(from, to).isPresent()) {
 						return true;
 					}
 				} catch (Throwable ignored) {

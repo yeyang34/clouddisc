@@ -67,7 +67,7 @@ public final class CloudDiscClient implements ClientModInitializer {
 		configKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 				"key.clouddisc.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, "category.clouddisc"));
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
-			while (configKey.wasPressed()) {
+			while (configKey.consumeClick()) {
 				openConfigScreen(null);
 			}
 		});

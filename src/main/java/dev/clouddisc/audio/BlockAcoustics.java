@@ -210,8 +210,8 @@ public final class BlockAcoustics {
 		}
 		// ---- 玻璃 / 水晶：透声但很亮（高频反射强）----
 		// 遮挡 0.50（非不透明 ×0.8、非完整方块 ×0.5 之后实际约 0.20）→ 截止 ≈ 0.41（只轻微闷）
-		if (g == SoundType.GLASS || g == SoundType.AMETHYST_BLOCK_BLOCK
-				|| g == SoundType.AMETHYST_BLOCK_CLUSTER || g == SoundType.SMALL_AMETHYST_BUD
+		if (g == SoundType.GLASS || g == SoundType.AMETHYST_BLOCK
+				|| g == SoundType.AMETHYST_CLUSTER || g == SoundType.SMALL_AMETHYST_BUD
 				|| g == SoundType.MEDIUM_AMETHYST_BUD || g == SoundType.LARGE_AMETHYST_BUD
 				|| g == SoundType.FROGLIGHT || g == SoundType.SHROOMLIGHT) {
 			return new Base("声音组 GLASS(玻璃/水晶)", 0.55f, 0.90f, 0.10f);
@@ -258,7 +258,7 @@ public final class BlockAcoustics {
 			return new Base("声音组 WOOD(木头/木板)", 0.55f, 0.30f, 0.55f);
 		}
 		// ---- 黏液 / 蜂蜜：软、吸声（0.60 → 0.50）----
-		if (g == SoundType.SLIME || g == SoundType.HONEY) {
+		if (g == SoundType.SLIME_BLOCK || g == SoundType.HONEY_BLOCK) {
 			return new Base("声音组 SLIME(黏液/蜂蜜)", 0.50f, 0.20f, 0.75f);
 		}
 		// ---- 深板岩系列：比普通石更密实一点 ----
@@ -318,7 +318,7 @@ public final class BlockAcoustics {
 	/** 方块注册名（形如 {@code minecraft:stone}，中文名可能为空时用这个）。 */
 	public static String blockId(BlockState state) {
 		try {
-			return net.minecraft.registry.Registries.BLOCK.getId(state.getBlock()).toString();
+			return net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
 		} catch (Throwable t) {
 			return "<未知方块>";
 		}
@@ -332,11 +332,11 @@ public final class BlockAcoustics {
 				"hay_block", "slime_block", "sculk", "gravel", "netherrack", "obsidian"};
 		for (String n : names) {
 			try {
-				net.minecraft.world.level.block.Block b = net.minecraft.registry.Registries.BLOCK.get(new net.minecraft.resources.Identifier(n));
+				net.minecraft.world.level.block.Block b = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(new net.minecraft.resources.Identifier(n));
 				if (b == null) {
 					continue;
 				}
-				BlockState st = b.getDefaultState();
+				BlockState st = b.defaultBlockState();
 				Params p = of(st);
 				out.add(n + "=(" + fmt2(p.occlusion()) + "," + fmt2(p.reflectivity()) + ","
 						+ fmt2(p.absorption()) + "|" + p.source() + ")");
