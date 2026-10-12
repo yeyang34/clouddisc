@@ -40,10 +40,16 @@ public final class CloudDiscClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		// 【26.2】注册中继通道的载荷类型（客户端 → 服务端 ✓ 用 CustomPacketPayload 新体系 ✓）
+				// 【26.2】注册中继通道的载荷类型。
+		// 注意方向（踩过一次坑 ✓）：
+		//   clientboundPlay  = 客户端【收】服务端的包（我们的应答 HELLO 走这个 ✓）
+		//   serverboundPlay  = 客户端【发】给服务端的包（我们的会话数据走这个 ✓）
+		// 客户端两个方向都要注册 ✓ 否则 registerGlobalReceiver 会报
+		// "no payload type has been registered … for CLIENTBOUND PLAY" ✗
+		net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.clientboundPlay()
+				.register(dev.clouddisc.net.CloudDiscRelayPayload.TYPE, dev.clouddisc.net.CloudDiscRelayPayload.CODEC);
 		net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.serverboundPlay()
 				.register(dev.clouddisc.net.CloudDiscRelayPayload.TYPE, dev.clouddisc.net.CloudDiscRelayPayload.CODEC);
-
 		config = CloudDiscConfig.get();
 		sync = new SyncService(config);
 		sync.init();
