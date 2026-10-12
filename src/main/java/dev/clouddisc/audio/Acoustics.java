@@ -799,7 +799,7 @@ public final class Acoustics {
 			double totalDist = 0.0;
 
 			for (int b = 0; b < REVERB_BOUNCES; b++) {
-				Vec3 end = origin.offset(dir.scale(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
 
 				// 【0.12.56】接收球判定（房间声学标准做法，用户提出的思路）：
@@ -1225,7 +1225,7 @@ public final class Acoustics {
 			Vec3 dir = new Vec3(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
 			Vec3 origin = ear;
 			for (int b = 0; b < 3; b++) {
-				Vec3 end = origin.offset(dir.scale(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit;
 				try {
 					hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
@@ -1416,14 +1416,14 @@ public final class Acoustics {
 	 */
 	private static boolean walkableCell(Level world, BlockPos n) {
 		try {
-			if (!freeAt(world, n) || !freeAt(world, n.up())) {
+			if (!freeAt(world, n) || !freeAt(world, n.above())) {
 				return false;
 			}
-			BlockPos below = n.down();
+			BlockPos below = n.below();
 			if (solidAt(world, below)) {
 				return true;
 			}
-			return solidAt(world, below.down());
+			return solidAt(world, below.below());
 		} catch (Throwable t) {
 			return false;
 		}

@@ -76,7 +76,7 @@ public final class ChatTransport implements Transport {
 	@Override
 	public void send(Protocol.Msg msg) {
 		Minecraft mc = Minecraft.getInstance();
-		ClientPlayNetworkHandler handler = mc.getNetworkHandler();
+		ClientPlayNetworkHandler handler = mc.getConnection();
 		if (handler == null || mc.player == null) {
 			return;
 		}
@@ -93,7 +93,7 @@ public final class ChatTransport implements Transport {
 		// 例外：服务器 enforce-secure-profile=true（1.20.1 默认）且本机没有 profile key 时，
 		// 客户端聊天会被服务端丢弃并提示 chat.disabled.missingProfileKey —— 需要实测确认。
 		mc.execute(() -> {
-			ClientPlayNetworkHandler h = mc.getNetworkHandler();
+			ClientPlayNetworkHandler h = mc.getConnection();
 			if (h != null) {
 				h.sendChatMessage(line);
 			}

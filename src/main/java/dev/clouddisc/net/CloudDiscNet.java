@@ -19,7 +19,7 @@ public final class CloudDiscNet {
 	 * 频道名。<b>冻结接口</b>：一旦发布就不再改动
 	 * （它是客户端与中继之间唯一的约定，改了等于让所有已部署的中继失效）。
 	 */
-	public static final Identifier RELAY = new Identifier("clouddisc", "relay");
+	public static final Identifier RELAY = Identifier.fromNamespaceAndPath("clouddisc", "relay");
 
 	/**
 	 * 载荷第 1 字节：会话数据。<b>冻结接口</b>。

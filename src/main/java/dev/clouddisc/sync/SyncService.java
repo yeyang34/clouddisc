@@ -79,7 +79,7 @@ public final class SyncService implements PlaybackController.Announcer {
 	public PlaybackController.Decision onWorldEvent(ClientLevel world, BlockPos pos, int eventId, int data) {
 		// 注意：Yarn 的 Level#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
 		// 千万不要用 getTimeOfDay()（会被 /time 改、会被 doDaylightCycle 冻住）。
-		return playback.onWorldEvent(world.getRegistryKey().getValue(), pos, eventId, data, world.getGameTime());
+		return playback.onWorldEvent(world.dimension().location(), pos, eventId, data, world.getGameTime());
 	}
 
 	/** 来自 {@code UseBlockCallback}：本地玩家右键方块。 */
@@ -87,14 +87,14 @@ public final class SyncService implements PlaybackController.Announcer {
 		if (!world.isClientSide() || hand != InteractionHand.MAIN_HAND) {
 			return InteractionResult.PASS;
 		}
-		if (!world.getBlockState(hit.getBlockPos()).isOf(Blocks.JUKEBOX)) {
+		if (!world.getBlockState(hit.getBlockPos()).is(Blocks.JUKEBOX)) {
 			return InteractionResult.PASS;
 		}
-		ItemStack stack = player.getStackInHand(hand);
+		ItemStack stack = player.getItemInHand(hand);
 		if (stack.isEmpty()) {
 			return InteractionResult.PASS;
 		}
-		playback.noteLocalUse(world.getRegistryKey().getValue(), hit.getBlockPos(), stack.getName());
+		playback.noteLocalUse(world.dimension().location(), hit.getBlockPos(), stack.getName());
 		return InteractionResult.PASS;
 	}
 

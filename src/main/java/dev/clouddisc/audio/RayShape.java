@@ -61,7 +61,7 @@ public final class RayShape {
 		}
 		List<AABB> boxes = null;
 		try {
-			boxes = shape.getBoundingBoxes();
+			boxes = shape.toAabbs();
 		} catch (Throwable ignored) {
 			// 拿不到盒子列表就走下面的兜底
 		}

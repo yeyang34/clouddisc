@@ -714,7 +714,7 @@ public final class PlaybackController {
 		// 这两种情况下原版已经响了，而我们随后接上 = **两条音轨同时出声**。
 		// playSong(null, pos) 是原版自己的停止路径：从 playingSongs 摘掉 + SoundManager.stop。
 		try {
-			Minecraft.getInstance().worldRenderer.playSong(null, s.pos());
+			/* [26.2] worldRenderer.playSong 已移除（JukeboxSongPlayer 体系） */;
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.debug("[CloudDisc] 停原版唱片实例失败（不影响我们播放）: {}", t.toString());
 		}
@@ -854,7 +854,7 @@ public final class PlaybackController {
 	private void fallbackVanilla(Held h) {
 		Minecraft mc = Minecraft.getInstance();
 		ClientLevel world = mc.level;
-		if (world == null || !world.getRegistryKey().getValue().toString().equals(h.dim)) {
+		if (world == null || !world.dimension().location().toString().equals(h.dim)) {
 			return;
 		}
 		Item item = Item.byRawId(h.itemId);

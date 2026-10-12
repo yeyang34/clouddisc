@@ -25,7 +25,7 @@ public final class StreamRegistry {
 
 	/** 生成一个新的 stream id（形如 {@code clouddisc:stream/7}）。 */
 	public static Identifier nextId() {
-		return new Identifier("clouddisc", "stream/" + COUNTER.incrementAndGet());
+		return Identifier.fromNamespaceAndPath("clouddisc", "stream/" + COUNTER.incrementAndGet());
 	}
 
 	public static void put(Identifier id, AudioStream stream) {
@@ -78,7 +78,7 @@ public final class StreamRegistry {
 		if (key.isEmpty()) {
 			return null;
 		}
-		return new Identifier("clouddisc", "stream/" + key);
+		return Identifier.fromNamespaceAndPath("clouddisc", "stream/" + key);
 	}
 
 	/** 便于调试：当前登记了多少条还没被 MC 取走的流。 */

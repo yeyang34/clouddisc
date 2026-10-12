@@ -40,7 +40,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	private final RandomSource random = RandomSource.create();
 
 	public CloudDiscSoundInstance(Identifier streamId, BlockPos pos, float volume) {
-		this.id = new Identifier("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
+		this.id = Identifier.fromNamespaceAndPath("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
 		// 自定义 Sound：FILE + stream=true —— 这就是"流式播放"的开关
 		this.sound = new Sound(streamId.toString(), r -> 1.0F, r -> 1.0F, 1,
 				Sound.RegistrationType.FILE, true, false, ATTENUATION_DISTANCE);
