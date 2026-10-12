@@ -91,7 +91,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public int getRepeatDelay() {
+	public int clouddisc$repeatDelay() {
 		return 0;
 	}
 
@@ -126,7 +126,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public boolean canPlay() {
+	public boolean canPlaySound() {
 		return true;
 	}
 }

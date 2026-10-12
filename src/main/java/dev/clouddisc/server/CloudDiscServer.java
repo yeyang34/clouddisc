@@ -63,7 +63,7 @@ public final class CloudDiscServer implements ModInitializer {
 			return;
 		}
 
-		ServerPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (server, player, handler, buf, sender) -> {
+		// [26.2] ServerPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (server, player, handler, buf, sender) -> {
 			if (buf.readableBytes() < 1) {
 				return;
 			}
@@ -101,7 +101,7 @@ public final class CloudDiscServer implements ModInitializer {
 					FriendlyByteBuf out = FriendlyByteBufs.create();
 					out.writeByte(first);
 					out.writeBytes(payload);
-					ServerPlayNetworking.send(other, CloudDiscNet.RELAY, out);
+					// [26.2] ServerPlayNetworking.send(other, CloudDiscNet.RELAY, out);
 					sent++;
 				} catch (Throwable t) {
 					LOGGER.debug("[CloudDisc] 转发给 {} 失败: {}", other.getGameProfile().getName(), t.toString());
@@ -127,7 +127,7 @@ public final class CloudDiscServer implements ModInitializer {
 			FriendlyByteBuf ack = FriendlyByteBufs.create();
 			ack.writeByte(CloudDiscNet.TYPE_HELLO);
 			ack.writeByte(CloudDiscNet.CONVENTION_VERSION);
-			ServerPlayNetworking.send(player, CloudDiscNet.RELAY, ack);
+			// [26.2] ServerPlayNetworking.send(player, CloudDiscNet.RELAY, ack);
 		} catch (Throwable t) {
 			LOGGER.debug("[CloudDisc] 应答 {} 失败: {}", player.getGameProfile().getName(), t.toString());
 		}
