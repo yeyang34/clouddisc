@@ -1,6 +1,6 @@
 package dev.clouddisc.audio;
 
-import net.minecraft.client.sound.AudioStream;
+import net.minecraft.client.sounds.AudioStream;
 
 import javax.sound.sampled.AudioFormat;
 import java.io.IOException;
@@ -13,7 +13,7 @@ import java.nio.ByteBuffer;
  * 通过 OpenAL 播放的（因此定位衰减、RECORDS 音量滑块、暂停、原版停止逻辑全都照旧生效），
  * 只是喂进去的 PCM 来自我们。
  *
- * <p>注意 {@code net.minecraft.client.sound.AudioStream}（Yarn 1.20.1）只有
+ * <p>注意 {@code net.minecraft.client.sounds.AudioStream}（Yarn 1.20.1）只有
  * {@code getFormat()} 与 {@code getBuffer(int)}，并继承 {@link AutoCloseable}：
  * <b>返回空缓冲 = 流结束</b>，所以欠载时必须补静音（见 {@link PcmRingBuffer#read}）。
  */

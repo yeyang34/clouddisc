@@ -1,15 +1,15 @@
 package dev.clouddisc.audio;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.world.BlockView;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.BlockGetter;
 
 /**
  * 体素射线遍历（Amanatides &amp; Woo 的 DDA）。
  *
- * <p><b>为什么不用 {@code World#raycast}</b>：
+ * <p><b>为什么不用 {@code Level#raycast}</b>：
  * <ol>
  *   <li>遮挡要的是"<b>沿连线一共穿过哪些方块</b>"（逐块累加材质遮挡值），
  *       而 {@code raycast} 只给"第一个命中"，要拿全部就得在命中点上反复续射 ——
@@ -48,12 +48,12 @@ public final class RayWalk {
 			this.t = t;
 		}
 
-		public Vec3d point() {
-			return new Vec3d(x, y, z);
+		public Vec3 point() {
+			return new Vec3(x, y, z);
 		}
 
-		public Vec3d normal() {
-			return new Vec3d(nx, ny, nz);
+		public Vec3 normal() {
+			return new Vec3(nx, ny, nz);
 		}
 	}
 
@@ -138,7 +138,7 @@ public final class RayWalk {
 	 *
 	 * @return 没打中返回 {@code null}（说明这条线一路通畅）
 	 */
-	public static Hit cast(BlockView world, Vec3d from, Vec3d to, int maxSteps) {
+	public static Hit cast(BlockGetter world, Vec3 from, Vec3 to, int maxSteps) {
 		final double dx = to.x - from.x;
 		final double dy = to.y - from.y;
 		final double dz = to.z - from.z;

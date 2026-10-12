@@ -1,9 +1,9 @@
 package dev.clouddisc.audio;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.sound.BlockSoundGroup;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.BlockView;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.sounds.BlockSoundGroup;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.BlockGetter;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -22,7 +22,7 @@ import java.util.Map;
  *
  * <h2>怎么推的</h2>
  * <ol>
- *   <li><b>基础值取"方块声音组"</b>（{@link BlockState#getSoundGroup()}，即 {@link BlockSoundGroup}
+ *   <li><b>基础值取"方块声音组"</b>（{@link BlockState#getSoundGroup()}，即 {@link SoundType}
  *       的那些单例：石/木/羊毛/玻璃/金属…）。理由是：声音组本来就是"这个方块听起来像什么材质"
  *       的官方分类，用它当材质类别最省事、也最不容易跑偏。</li>
  *   <li><b>再按几何打折</b>：{@link BlockState#isOpaqueFullCube} 为假（楼梯/栅栏/玻璃板…）→
@@ -89,7 +89,7 @@ public final class BlockAcoustics {
 	 * 实际用于"沿连线"累加的遮挡值：材质基础值 + 几何/液体/硬度修正。
 	 * <p>需要 {@code world/pos} 只是为了 {@link BlockState#isOpaqueFullCube}（它可能跟位置有关）。
 	 */
-	public static float occlusionOf(BlockState state, BlockView world, BlockPos pos) {
+	public static float occlusionOf(BlockState state, BlockGetter world, BlockPos pos) {
 		Params p = of(state);
 		float occ = p.occlusion();
 		try {
@@ -123,7 +123,7 @@ public final class BlockAcoustics {
 	}
 
 	private static Params derive(BlockState state) {
-		BlockSoundGroup g = null;
+		SoundType g = null;
 		boolean opaque = true;
 		boolean liquid = false;
 		float hardness = 1.0f;
@@ -145,8 +145,8 @@ public final class BlockAcoustics {
 		// "听起来像草木、其实是实心方块"的例外：草方块 / 湿草 / 苔藓块用的是草木那组声音，
 		// 但它们本身是完整实心方块，挡声应当按"地面"算，不能按灌木算。
 		// 判据很好找：树叶不是 opaque，草方块是。
-		boolean plantLike = g == BlockSoundGroup.GRASS || g == BlockSoundGroup.WET_GRASS
-				|| g == BlockSoundGroup.MOSS_BLOCK;
+		boolean plantLike = g == SoundType.GRASS || g == SoundType.WET_GRASS
+				|| g == SoundType.MOSS_BLOCK;
 		if (plantLike && opaque) {
 			occ = Math.max(occ, 0.85f);
 			refl = 0.25f;
@@ -184,7 +184,7 @@ public final class BlockAcoustics {
 	}
 
 	/**
-	 * 基础表：<b>按方块声音组的恒等比较</b>（{@link BlockSoundGroup} 的单例没有 equals 覆写，
+	 * 基础表：<b>按方块声音组的恒等比较</b>（{@link SoundType} 的单例没有 equals 覆写，
 	 * 用 {@code ==} 就是"同一个材质类别"）。
 	 *
 	 * <p><b>0.12.6 的遮挡值调整（拉开对比，配合 k=4.5）</b>：目标是"玻璃只轻微闷、木板中间、石头最闷"。
@@ -199,87 +199,87 @@ public final class BlockAcoustics {
 	 * 旧值下木板(0.82)与石头(1.00)在 {@code exp(-occ*3)} 里都掉到 0.05 以下，听感几乎一样 ——
 	 * 这是"三档分不出来"的直接原因。
 	 */
-	private static Base baseFor(BlockSoundGroup g) {
-		if (g == null || g == BlockSoundGroup.INTENTIONALLY_EMPTY) {
+	private static Base baseFor(SoundType g) {
+		if (g == null || g == SoundType.INTENTIONALLY_EMPTY) {
 			return new Base(SOURCE_DEFAULT, DEFAULT[0], DEFAULT[1], DEFAULT[2]);
 		}
 		// ---- 金属 / 矿石类：硬、极反射、几乎不吸声 ----
-		if (g == BlockSoundGroup.METAL || g == BlockSoundGroup.ANVIL || g == BlockSoundGroup.NETHERITE
-				|| g == BlockSoundGroup.LODESTONE || g == BlockSoundGroup.CHAIN || g == BlockSoundGroup.COPPER
-				|| g == BlockSoundGroup.NETHER_ORE || g == BlockSoundGroup.NETHER_GOLD_ORE
-				|| g == BlockSoundGroup.ANCIENT_DEBRIS || g == BlockSoundGroup.GILDED_BLACKSTONE
-				|| g == BlockSoundGroup.BONE || g == BlockSoundGroup.LANTERN) {
+		if (g == SoundType.METAL || g == SoundType.ANVIL || g == SoundType.NETHERITE
+				|| g == SoundType.LODESTONE || g == SoundType.CHAIN || g == SoundType.COPPER
+				|| g == SoundType.NETHER_ORE || g == SoundType.NETHER_GOLD_ORE
+				|| g == SoundType.ANCIENT_DEBRIS || g == SoundType.GILDED_BLACKSTONE
+				|| g == SoundType.BONE || g == SoundType.LANTERN) {
 			return new Base("声音组 METAL(金属/矿石)", 1.00f, 0.85f, 0.12f);
 		}
 		// ---- 玻璃 / 水晶：透声但很亮（高频反射强）----
 		// 遮挡 0.50（非不透明 ×0.8、非完整方块 ×0.5 之后实际约 0.20）→ 截止 ≈ 0.41（只轻微闷）
-		if (g == BlockSoundGroup.GLASS || g == BlockSoundGroup.AMETHYST_BLOCK
-				|| g == BlockSoundGroup.AMETHYST_CLUSTER || g == BlockSoundGroup.SMALL_AMETHYST_BUD
-				|| g == BlockSoundGroup.MEDIUM_AMETHYST_BUD || g == BlockSoundGroup.LARGE_AMETHYST_BUD
-				|| g == BlockSoundGroup.FROGLIGHT || g == BlockSoundGroup.SHROOMLIGHT) {
+		if (g == SoundType.GLASS || g == SoundType.AMETHYST_BLOCK
+				|| g == SoundType.AMETHYST_CLUSTER || g == SoundType.SMALL_AMETHYST_BUD
+				|| g == SoundType.MEDIUM_AMETHYST_BUD || g == SoundType.LARGE_AMETHYST_BUD
+				|| g == SoundType.FROGLIGHT || g == SoundType.SHROOMLIGHT) {
 			return new Base("声音组 GLASS(玻璃/水晶)", 0.55f, 0.90f, 0.10f);
 		}
 		// ---- 羊毛 / 苔藓 / 雪：强吸声，几乎不反射 ----
-		if (g == BlockSoundGroup.WOOL || g == BlockSoundGroup.MOSS_CARPET || g == BlockSoundGroup.MOSS_BLOCK
-				|| g == BlockSoundGroup.SNOW || g == BlockSoundGroup.POWDER_SNOW
-				|| g == BlockSoundGroup.AZALEA_LEAVES || g == BlockSoundGroup.CHERRY_LEAVES
-				|| g == BlockSoundGroup.SCULK_VEIN || g == BlockSoundGroup.PINK_PETALS) {
+		if (g == SoundType.WOOL || g == SoundType.MOSS_CARPET || g == SoundType.MOSS_BLOCK
+				|| g == SoundType.SNOW || g == SoundType.POWDER_SNOW
+				|| g == SoundType.AZALEA_LEAVES || g == SoundType.CHERRY_LEAVES
+				|| g == SoundType.SCULK_VEIN || g == SoundType.PINK_PETALS) {
 			return new Base("声音组 WOOL(羊毛/雪/苔藓)", 0.45f, 0.12f, 0.90f);
 		}
 		// ---- 树叶 / 藤蔓 / 作物：稀疏、挡一点、反射中等偏低（0.35 → 0.30）----
-		if (g == BlockSoundGroup.GRASS || g == BlockSoundGroup.WET_GRASS || g == BlockSoundGroup.CROP
-				|| g == BlockSoundGroup.STEM || g == BlockSoundGroup.VINE || g == BlockSoundGroup.WEEPING_VINES
-				|| g == BlockSoundGroup.WEEPING_VINES_LOW_PITCH || g == BlockSoundGroup.CAVE_VINES
-				|| g == BlockSoundGroup.NETHER_WART || g == BlockSoundGroup.NETHER_SPROUTS
-				|| g == BlockSoundGroup.NETHER_STEM || g == BlockSoundGroup.FUNGUS || g == BlockSoundGroup.ROOTS
-				|| g == BlockSoundGroup.HANGING_ROOTS || g == BlockSoundGroup.GLOW_LICHEN
-				|| g == BlockSoundGroup.LILY_PAD || g == BlockSoundGroup.SPORE_BLOSSOM
-				|| g == BlockSoundGroup.BIG_DRIPLEAF || g == BlockSoundGroup.SMALL_DRIPLEAF
-				|| g == BlockSoundGroup.AZALEA || g == BlockSoundGroup.FLOWERING_AZALEA
-				|| g == BlockSoundGroup.CHERRY_SAPLING || g == BlockSoundGroup.BAMBOO_SAPLING
-				|| g == BlockSoundGroup.SWEET_BERRY_BUSH || g == BlockSoundGroup.CORAL
-				|| g == BlockSoundGroup.HANGING_SIGN || g == BlockSoundGroup.NETHER_WOOD_HANGING_SIGN
-				|| g == BlockSoundGroup.BAMBOO_WOOD_HANGING_SIGN || g == BlockSoundGroup.CHERRY_WOOD_HANGING_SIGN
-				|| g == BlockSoundGroup.SCAFFOLDING || g == BlockSoundGroup.LADDER) {
+		if (g == SoundType.GRASS || g == SoundType.WET_GRASS || g == SoundType.CROP
+				|| g == SoundType.STEM || g == SoundType.VINE || g == SoundType.WEEPING_VINES
+				|| g == SoundType.WEEPING_VINES_LOW_PITCH || g == SoundType.CAVE_VINES
+				|| g == SoundType.NETHER_WART || g == SoundType.NETHER_SPROUTS
+				|| g == SoundType.NETHER_STEM || g == SoundType.FUNGUS || g == SoundType.ROOTS
+				|| g == SoundType.HANGING_ROOTS || g == SoundType.GLOW_LICHEN
+				|| g == SoundType.LILY_PAD || g == SoundType.SPORE_BLOSSOM
+				|| g == SoundType.BIG_DRIPLEAF || g == SoundType.SMALL_DRIPLEAF
+				|| g == SoundType.AZALEA || g == SoundType.FLOWERING_AZALEA
+				|| g == SoundType.CHERRY_SAPLING || g == SoundType.BAMBOO_SAPLING
+				|| g == SoundType.SWEET_BERRY_BUSH || g == SoundType.CORAL
+				|| g == SoundType.HANGING_SIGN || g == SoundType.NETHER_WOOD_HANGING_SIGN
+				|| g == SoundType.BAMBOO_WOOD_HANGING_SIGN || g == SoundType.CHERRY_WOOD_HANGING_SIGN
+				|| g == SoundType.SCAFFOLDING || g == SoundType.LADDER) {
 			return new Base("声音组 GRASS(草木/树叶)", 0.12f, 0.28f, 0.65f);
 		}
 		// ---- 沙 / 土 / 砾 / 泥 / 菌岩：松散地面，吸声较强（0.75 → 0.70）----
-		if (g == BlockSoundGroup.SAND || g == BlockSoundGroup.GRAVEL || g == BlockSoundGroup.SOUL_SAND
-				|| g == BlockSoundGroup.SOUL_SOIL || g == BlockSoundGroup.NYLIUM || g == BlockSoundGroup.MUD
-				|| g == BlockSoundGroup.PACKED_MUD || g == BlockSoundGroup.MUD_BRICKS
-				|| g == BlockSoundGroup.ROOTED_DIRT || g == BlockSoundGroup.MUDDY_MANGROVE_ROOTS
-				|| g == BlockSoundGroup.MANGROVE_ROOTS || g == BlockSoundGroup.SUSPICIOUS_SAND
-				|| g == BlockSoundGroup.SUSPICIOUS_GRAVEL || g == BlockSoundGroup.WART_BLOCK
-				|| g == BlockSoundGroup.FROGSPAWN) {
+		if (g == SoundType.SAND || g == SoundType.GRAVEL || g == SoundType.SOUL_SAND
+				|| g == SoundType.SOUL_SOIL || g == SoundType.NYLIUM || g == SoundType.MUD
+				|| g == SoundType.PACKED_MUD || g == SoundType.MUD_BRICKS
+				|| g == SoundType.ROOTED_DIRT || g == SoundType.MUDDY_MANGROVE_ROOTS
+				|| g == SoundType.MANGROVE_ROOTS || g == SoundType.SUSPICIOUS_SAND
+				|| g == SoundType.SUSPICIOUS_GRAVEL || g == SoundType.WART_BLOCK
+				|| g == SoundType.FROGSPAWN) {
 			return new Base("声音组 SAND(沙/土/砾)", 0.70f, 0.22f, 0.72f);
 		}
 		// ---- 木头 / 竹子 / 书架：中等遮挡、中等反射（0.82 → 0.55，有意调到"玻璃与石头之间"）----
-		if (g == BlockSoundGroup.WOOD || g == BlockSoundGroup.BAMBOO || g == BlockSoundGroup.BAMBOO_WOOD
-				|| g == BlockSoundGroup.NETHER_WOOD || g == BlockSoundGroup.CHERRY_WOOD
-				|| g == BlockSoundGroup.CHISELED_BOOKSHELF || g == BlockSoundGroup.DECORATED_POT
-				|| g == BlockSoundGroup.DECORATED_POT_SHATTER || g == BlockSoundGroup.CANDLE) {
+		if (g == SoundType.WOOD || g == SoundType.BAMBOO || g == SoundType.BAMBOO_WOOD
+				|| g == SoundType.NETHER_WOOD || g == SoundType.CHERRY_WOOD
+				|| g == SoundType.CHISELED_BOOKSHELF || g == SoundType.DECORATED_POT
+				|| g == SoundType.DECORATED_POT_SHATTER || g == SoundType.CANDLE) {
 			return new Base("声音组 WOOD(木头/木板)", 0.55f, 0.30f, 0.55f);
 		}
 		// ---- 黏液 / 蜂蜜：软、吸声（0.60 → 0.50）----
-		if (g == BlockSoundGroup.SLIME || g == BlockSoundGroup.HONEY) {
+		if (g == SoundType.SLIME || g == SoundType.HONEY) {
 			return new Base("声音组 SLIME(黏液/蜂蜜)", 0.50f, 0.20f, 0.75f);
 		}
 		// ---- 深板岩系列：比普通石更密实一点 ----
-		if (g == BlockSoundGroup.DEEPSLATE || g == BlockSoundGroup.DEEPSLATE_BRICKS
-				|| g == BlockSoundGroup.DEEPSLATE_TILES || g == BlockSoundGroup.POLISHED_DEEPSLATE
-				|| g == BlockSoundGroup.BASALT || g == BlockSoundGroup.NETHER_BRICKS
-				|| g == BlockSoundGroup.TUFF || g == BlockSoundGroup.CALCITE) {
+		if (g == SoundType.DEEPSLATE || g == SoundType.DEEPSLATE_BRICKS
+				|| g == SoundType.DEEPSLATE_TILES || g == SoundType.POLISHED_DEEPSLATE
+				|| g == SoundType.BASALT || g == SoundType.NETHER_BRICKS
+				|| g == SoundType.TUFF || g == SoundType.CALCITE) {
 			return new Base("声音组 DEEPSLATE(深板岩系)", 1.00f, 0.55f, 0.40f);
 		}
 		// ---- 幽匿系列：软而吸声（0.65 → 0.55）----
-		if (g == BlockSoundGroup.SCULK || g == BlockSoundGroup.SCULK_CATALYST
-				|| g == BlockSoundGroup.SCULK_SENSOR || g == BlockSoundGroup.SCULK_SHRIEKER) {
+		if (g == SoundType.SCULK || g == SoundType.SCULK_CATALYST
+				|| g == SoundType.SCULK_SENSOR || g == SoundType.SCULK_SHRIEKER) {
 			return new Base("声音组 SCULK(幽匿系)", 0.55f, 0.25f, 0.70f);
 		}
 		// ---- 石头（默认大类）：硬、反射中等、吸声弱 ----
-		if (g == BlockSoundGroup.STONE || g == BlockSoundGroup.NETHERRACK
-				|| g == BlockSoundGroup.GILDED_BLACKSTONE || g == BlockSoundGroup.POINTED_DRIPSTONE
-				|| g == BlockSoundGroup.DRIPSTONE_BLOCK) {
+		if (g == SoundType.STONE || g == SoundType.NETHERRACK
+				|| g == SoundType.GILDED_BLACKSTONE || g == SoundType.POINTED_DRIPSTONE
+				|| g == SoundType.DRIPSTONE_BLOCK) {
 			return new Base("声音组 STONE(石头)", 1.00f, 0.60f, 0.45f);
 		}
 		return new Base(SOURCE_DEFAULT, DEFAULT[0], DEFAULT[1], DEFAULT[2]);
@@ -302,7 +302,7 @@ public final class BlockAcoustics {
 	 * </pre>
 	 * <b>看到"来源=默认值"就说明材质表退化了</b>（声音组的恒等比较没匹配上，全走了兜底）。
 	 */
-	public static String probeLine(BlockState state, BlockView world, BlockPos pos) {
+	public static String probeLine(BlockState state, BlockGetter world, BlockPos pos) {
 		Params p = of(state);
 		String src = p.source();
 		try {
@@ -328,14 +328,14 @@ public final class BlockAcoustics {
 	}
 
 	/** 诊断用：把几张常见方块的实际参数打出来，方便"数值 ↔ 听感"对齐（含来源标签）。 */
-	public static List<String> sampleTable(BlockView world) {
+	public static List<String> sampleTable(BlockGetter world) {
 		List<String> out = new ArrayList<>();
 		String[] names = {"stone", "oak_planks", "glass", "white_wool", "dirt", "oak_leaves",
 				"iron_block", "water", "cobblestone", "oak_log", "sand", "bedrock", "deepslate", "moss_block",
 				"hay_block", "slime_block", "sculk", "gravel", "netherrack", "obsidian"};
 		for (String n : names) {
 			try {
-				net.minecraft.block.Block b = net.minecraft.registry.Registries.BLOCK.get(new net.minecraft.util.Identifier(n));
+				net.minecraft.world.level.block.Block b = net.minecraft.registry.Registries.BLOCK.get(new net.minecraft.util.Identifier(n));
 				if (b == null) {
 					continue;
 				}

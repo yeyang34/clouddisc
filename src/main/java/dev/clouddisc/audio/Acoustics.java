@@ -1117,7 +1117,7 @@ public final class Acoustics {
 	 */
 	private static boolean hitsShape(VoxelShape shape, Vec3 from, Vec3 to, BlockPos pos) {
 		try {
-			Box bb = shape.getBoundingBox();
+			AABB bb = shape.getBoundingBox();
 			boolean fullCube = bb.minX <= 1.0e-3 && bb.minY <= 1.0e-3 && bb.minZ <= 1.0e-3
 					&& bb.maxX >= 1.0 - 1.0e-3 && bb.maxY >= 1.0 - 1.0e-3 && bb.maxZ >= 1.0 - 1.0e-3;
 			if (fullCube) {
