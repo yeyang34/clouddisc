@@ -75,6 +75,7 @@ public final class CloudDiscClient implements ClientModInitializer {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
 				dispatcher.register(ClientCommands.literal("clouddisc").executes(context -> {
 					Minecraft client = context.getSource().getClient();
+					LOGGER.info("[CloudDisc] /clouddisc 命令触发 → 打开界面");
 					client.execute(() -> openConfigScreen(null));
 					return 1;
 				})));
@@ -104,6 +105,7 @@ public final class CloudDiscClient implements ClientModInitializer {
 	}
 
 	private static KeyMapping configKey;
+	private static long heartbeatTicks = 0L;
 
 	/** 打开配置界面。{@code parent} 为 null 时返回上一级由屏幕自己处理（回到游戏）。 */
 	public static void openConfigScreen(Screen parent) {
