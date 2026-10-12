@@ -68,6 +68,7 @@ public final class CloudDiscClient implements ClientModInitializer {
 				"key.clouddisc.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, net.minecraft.client.KeyMapping.Category.MISC));
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (configKey.consumeClick()) {
+			LOGGER.info("[CloudDisc] 配置按键被按下 → 打开界面");
 				openConfigScreen(null);
 			}
 		});
@@ -107,6 +108,10 @@ public final class CloudDiscClient implements ClientModInitializer {
 	/** 打开配置界面。{@code parent} 为 null 时返回上一级由屏幕自己处理（回到游戏）。 */
 	public static void openConfigScreen(Screen parent) {
 		Minecraft client = Minecraft.getInstance();
-		// client.setScreenAndShow(new CloudDiscConfigScreen(parent)); // 阶段3 恢复
+		// try {
+			client.setScreenAndShow(new CloudDiscConfigScreen(parent));
+		} catch (Throwable t) {
+			LOGGER.error("[CloudDisc] 打开配置界面失败（诊断）", t);
+		} // 阶段3 恢复
 	}
 }

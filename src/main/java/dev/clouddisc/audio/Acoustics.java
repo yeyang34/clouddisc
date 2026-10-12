@@ -134,6 +134,7 @@ public final class Acoustics {
 	private static volatile int lastSourceId = 0;
 	private static volatile long lastSourceTick = Long.MIN_VALUE / 2;
 	private static volatile SoundEngine soundEngine;
+	private static boolean opennessLogged = false;
 
 	// ---------------------------------------------------------------- 每个声源的平滑状态
 	private static final class State {
@@ -1057,6 +1058,8 @@ public final class Acoustics {
 	}
 
 	/** 沿 from → to 逐格累加材质遮挡值。 */
+	private static boolean occlusionLogged = false;
+
 	private static double occlusionAt(Level world, Vec3 from, Vec3 to, BlockPos skip) {
 		final double[] acc = {0.0};
 		RayWalk.walk(from.x, from.y, from.z, to.x, to.y, to.z, MAX_OCC_STEPS, (x, y, z, t, nx, ny, nz) -> {
@@ -1162,6 +1165,16 @@ public final class Acoustics {
 				Vec3 to = p.add(new Vec3(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0));
 				BlockHitResult hit = world.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
 						ClipContext.Fluid.NONE, self));
+				// 【26.2 诊断】第一条射线打印原始信息（一次性，方便定位"射线为什么打不到"）
+				if (total == 1 && !opennessLogged) {
+					opennessLogged = true;
+					CloudDiscClient.LOGGER.info("[CloudDisc] 诊断/开阔度: p=({},{},{}) from=({},{},{}) to=({},{},{}) clip={} type={} pos={}",
+							fmt1(p.x), fmt1(p.y), fmt1(p.z),
+							fmt1(from.x), fmt1(from.y), fmt1(from.z),
+							fmt1(to.x), fmt1(to.y), fmt1(to.z),
+							(hit == null ? "null" : "非空"), (hit == null ? "null" : String.valueOf(hit.getType())),
+							(hit == null ? "null" : String.valueOf(hit.getBlockPos())));
+				}
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
 					open++;
 				} else if (false && hit.getLocation().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
