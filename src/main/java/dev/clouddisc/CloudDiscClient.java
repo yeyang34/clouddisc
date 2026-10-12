@@ -5,10 +5,10 @@ import dev.clouddisc.sync.SyncService;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.loader.api.FabricLoader;
@@ -64,15 +64,15 @@ public final class CloudDiscClient implements ClientModInitializer {
 		//   ① 快捷键（默认 K，可在"选项 → 控制"里改）
 		//   ② 客户端命令 /clouddisc —— 纯客户端命令，服务器没装任何东西也能用
 		//   ③ ModMenu 的模组列表按钮（装了 ModMenu 才会出现，见 ModMenuIntegration）
-		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.clouddisc.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_K, "category.clouddisc"));
+		configKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.clouddisc.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, "category.clouddisc"));
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (configKey.wasPressed()) {
 				openConfigScreen(null);
 			}
 		});
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-				dispatcher.register(ClientCommandManager.literal("clouddisc").executes(context -> {
+				dispatcher.register(ClientCommands.literal("clouddisc").executes(context -> {
 					MinecraftClient client = context.getSource().getClient();
 					client.execute(() -> openConfigScreen(null));
 					return 1;
@@ -102,7 +102,7 @@ public final class CloudDiscClient implements ClientModInitializer {
 		return config;
 	}
 
-	private static KeyBinding configKey;
+	private static KeyMapping configKey;
 
 	/** 打开配置界面。{@code parent} 为 null 时返回上一级由屏幕自己处理（回到游戏）。 */
 	public static void openConfigScreen(Screen parent) {
