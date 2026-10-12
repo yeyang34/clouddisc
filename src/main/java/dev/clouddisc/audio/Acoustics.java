@@ -1145,9 +1145,9 @@ public final class Acoustics {
 			try {
 				// 【0.12.34】起点必须离开方块本身 0.6 格：否则向下的射线会撞到脚下的底座、
 				// 水平射线会撞到唱片机自己或紧贴的方块，于是"露天也会被判成封闭"（实测真凶）。
-				Vec3 from = p.add(d[0] * 0.6, d[1] * 0.6, d[2] * 0.6);
-				Vec3 to = p.add(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0);
-				BlockHitResult hit = world.raycast(new ClipContext(from, to, ClipContext.Block.COLLIDER,
+				Vec3 from = p.add(new Vec3(d[0] * 0.6, d[1] * 0.6, d[2] * 0.6));
+				Vec3 to = p.add(new Vec3(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0));
+				BlockHitResult hit = world.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
 						ClipContext.Fluid.NONE, self));
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
 					open++;
@@ -1192,7 +1192,7 @@ public final class Acoustics {
 	private static Vec3 closestPointOnSegment(Vec3 a, Vec3 b, Vec3 p) {
 		try {
 			Vec3 ab = b.subtract(a);
-			double len2 = ab.lengthSquared();
+			double len2 = ab.lengthSqr();
 			if (len2 < 1.0e-9) {
 				return a;
 			}
@@ -1310,17 +1310,17 @@ public final class Acoustics {
 	private static Vec3 perpendicularOffset(Vec3 center, Vec3 ear, int sx, int sy, int sz) {
 		try {
 			Vec3 axis = ear.subtract(center);
-			if (axis.lengthSquared() < 1.0e-9) {
+			if (axis.lengthSqr() < 1.0e-9) {
 				return new Vec3(sx, sy, sz);
 			}
 			axis = axis.normalize();
 			Vec3 ref = Math.abs(axis.y) < 0.9 ? new Vec3(0.0, 1.0, 0.0) : new Vec3(1.0, 0.0, 0.0);
-			Vec3 u = axis.crossProduct(ref);
-			if (u.lengthSquared() < 1.0e-9) {
+			Vec3 u = axis.cross(ref);
+			if (u.lengthSqr() < 1.0e-9) {
 				return new Vec3(sx, sy, sz);
 			}
 			u = u.normalize();
-			Vec3 v = axis.crossProduct(u).normalize();
+			Vec3 v = axis.cross(u).normalize();
 			int idx = ((sx > 0 ? 1 : 0) << 2) | ((sy > 0 ? 1 : 0) << 1) | (sz > 0 ? 1 : 0);
 			double ang = idx * (Math.PI / 4.0);
 			return u.multiply(Math.cos(ang)).add(v.multiply(Math.sin(ang)));
@@ -1364,7 +1364,7 @@ public final class Acoustics {
 					continue;
 				}
 				for (int i = 0; i < 6; i++) {
-					BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+					BlockPos n = p.add(new Vec3(DX[i], DY[i], DZ[i]));
 					if (dist.containsKey(n)) {
 						continue;
 					}
@@ -1485,7 +1485,7 @@ public final class Acoustics {
 				continue;
 			}
 			for (int i = 0; i < 6; i++) {
-				BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+				BlockPos n = p.add(new Vec3(DX[i], DY[i], DZ[i]));
 				if (dist.containsKey(n)) {
 					continue;
 				}

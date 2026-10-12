@@ -14,7 +14,7 @@ import dev.clouddisc.sync.Protocol;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.RecordItem;
+import net.minecraft.world.item.Item; // [26.2] 唱片物品体系变了（JukeboxPlayable），先用 Item 占位
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.network.chat.Component;
