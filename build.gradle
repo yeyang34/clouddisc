@@ -1,5 +1,5 @@
 plugins {
-	id 'fabric-loom' version '1.6.12'
+	id 'fabric-loom' version '1.18.4'
 	id 'maven-publish'
 }
 
@@ -11,6 +11,9 @@ base {
 }
 
 repositories {
+	// 【26.2 移植】国内镜像：Loom 拉 MC libraries / 公共依赖走它们，避免 Mojang 源慢到超时
+	maven { name = 'BMCLAPI'; url = 'https://bmclapi2.bangbang93.com/maven' }
+	maven { name = 'Aliyun'; url = 'https://maven.aliyun.com/repository/public' }
 	// Loom 会自动加入 Minecraft / Fabric 所需的仓库，这里补第三方
 	maven { name = 'Shedaniel'; url = 'https://maven.shedaniel.me/' }
 	maven { name = 'TerraformersMC'; url = 'https://maven.terraformersmc.com/releases/' }
@@ -19,12 +22,12 @@ repositories {
 
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	// ModMenu 的模组列表入口（仅编译期需要；运行期没装 ModMenu 也不会加载那个类）
-	modCompileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+	// modCompileOnly modmenu —— 26.2 版待查，先不用
 
 	// MP3 解码（LGPL-2.1，见 THIRD-PARTY.md）。
 	// 用 Loom 的 include 打成嵌套 jar（META-INF/jars/），不打进主 classpath，
@@ -45,7 +48,7 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 java {
-	sourceCompatibility = JavaVersion.VERSION_17
-	targetCompatibility = JavaVersion.VERSION_17
+	sourceCompatibility = JavaVersion.toVersion(25)
+	targetCompatibility = JavaVersion.toVersion(25)
 	withSourcesJar()
 }
