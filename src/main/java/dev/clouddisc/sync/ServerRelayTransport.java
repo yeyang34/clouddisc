@@ -1,21 +1,50 @@
 package dev.clouddisc.sync;
 
-import net.minecraft.resources.Identifier;
 import java.util.function.Consumer;
 
-/** 【26.2 移植 · 哑实现】中继：网络 API 变了，先用聊天兜底；阶段4用新 payload API 重写本类。 */
+/**
+ * 【26.2 移植 · 哑实现】自建中继通道。
+ * 26.2 的网络自定义包 API 换成了 CustomPacketPayload 体系，本类先提供完整的 Transport 接口但不可用，
+ * 同步自动退回聊天兜底（ChatTransport）；阶段 4 用新 API 重写本类。
+ */
 public final class ServerRelayTransport implements Transport {
 
-	public static final Identifier CHANNEL = Identifier.fromNamespaceAndPath("clouddisc", "relay");
+	@Override
+	public String name() {
+		return "server-relay(26.2 待适配)";
+	}
 
-	@Override public boolean available() { return false; }
-	@Override public void send(byte[] data) { }
-	@Override public String name() { return "server-relay(26.2 待适配)"; }
+	@Override
+	public void start(Consumer<Protocol.Msg> listener) {
+	}
 
-	// —— 以下为 SyncService 会用到的接口，全部做空实现 ——
-	public void start(Consumer<byte[]> onMessage) { }
-	public void sayHello() { }
-	public void resetAttempts() { }
-	public void close() { }
-	public boolean isReady() { return false; }
+	@Override
+	public void send(Protocol.Msg msg) {
+	}
+
+	@Override
+	public int peerCount() {
+		return 0;
+	}
+
+	@Override
+	public boolean carriesUri() {
+		return true;
+	}
+
+	@Override
+	public boolean isReady() {
+		return false;
+	}
+
+	@Override
+	public void close() {
+	}
+
+	// SyncService 另外会用到（阶段 4 恢复真实实现）
+	public void sayHello() {
+	}
+
+	public void resetAttempts() {
+	}
 }

@@ -43,7 +43,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 		this.id = Identifier.fromNamespaceAndPath("clouddisc", "session/" + streamId.getPath().substring("stream/".length()));
 		// 自定义 Sound：FILE + stream=true —— 这就是"流式播放"的开关
 		this.sound = new Sound(streamId.toString(), r -> 1.0F, r -> 1.0F, 1,
-				Sound.RegistrationType.FILE, true, false, ATTENUATION_DISTANCE);
+				net.minecraft.client.resources.sounds.Sound.Type.FILE, true, false, ATTENUATION_DISTANCE);
 		this.x = pos.getX() + 0.5;
 		this.y = pos.getY() + 0.5;
 		this.z = pos.getZ() + 0.5;
@@ -58,7 +58,7 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	@Override
 	public net.minecraft.client.sounds.WeighedSoundEvents resolve(SoundManager soundManager) {
 		// 绕过 sounds.json：直接把我们的 Sound 打包成 Set 交回去
-		SoundEventRegistration set = new SoundEventRegistration(getId(), null);
+		SoundEventRegistration set = new SoundEventRegistration(java.util.List.of(sound), false, null);
 		set.add(this.sound);
 		return set;
 	}

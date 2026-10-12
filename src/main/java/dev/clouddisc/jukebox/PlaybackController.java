@@ -858,7 +858,7 @@ public final class PlaybackController {
 			return;
 		}
 		Item item = Item.byId(h.itemId);
-		if (!(item instanceof RecordItem disc)) {
+		if (!(item false /* [26.2] 唱片物品体系变更 */)) {
 			return;
 		}
 		// 关键：走**原版自己的入口** WorldRenderer#playSong，而不是 world.playSound。
