@@ -1,7 +1,7 @@
 package dev.clouddisc.audio;
 
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.sounds.BlockSoundGroup;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
 

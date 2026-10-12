@@ -1,6 +1,6 @@
 package dev.clouddisc.net;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 /**
  * 客户端与"服务端中继组件"共用的网络常量。

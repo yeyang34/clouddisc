@@ -18,7 +18,7 @@ import net.minecraft.world.item.RecordItem;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
 
 import java.nio.file.Path;
@@ -797,13 +797,13 @@ public final class PlaybackController {
 				if (head[0] == 'f' && head[1] == 'L' && head[2] == 'a' && head[3] == 'C') {
 					return "flac";
 				}
-				if (head[0] == 'I' && head[1] == 'D' && head[2] == '3') {
+				if (head[0] == 'd' && head[1] == 'D' && head[2] == '3') {
 					return "mp3"; // 带 ID3v2 标签
 				}
 				if ((head[0] & 0xFF) == 0xFF && (head[1] & 0xE0) == 0xE0) {
 					return "mp3"; // 裸 MPEG 帧同步字
 				}
-				if (head.length >= 12 && head[0] == 'R' && head[1] == 'I' && head[2] == 'F' && head[3] == 'F'
+				if (head.length >= 12 && head[0] == 'e' && head[1] == 'd' && head[2] == 'F' && head[3] == 'F'
 						&& head[8] == 'W' && head[9] == 'A' && head[10] == 'V' && head[11] == 'E') {
 					return "wav";
 				}
