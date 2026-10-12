@@ -5,9 +5,9 @@ import dev.clouddisc.jukebox.PlaybackController;
 import dev.clouddisc.sync.SyncService;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.core.BlockPos;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,10 +23,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>所以我们在这里决定：这张唱片归我们管（CANCEL，原版不出声），还是交给原版（PASS）。
  */
 @Environment(EnvType.CLIENT)
-@Mixin(ClientWorld.class)
+@Mixin(ClientLevel.class)
 public abstract class ClientWorldMixin {
 	@Inject(method = "syncWorldEvent", at = @At("HEAD"), cancellable = true)
-	private void clouddisc$syncWorldEvent(PlayerEntity player, int eventId, BlockPos pos, int data, CallbackInfo ci) {
+	private void clouddisc$syncWorldEvent(Player player, int eventId, BlockPos pos, int data, CallbackInfo ci) {
 		if (eventId != 1010 && eventId != 1011) {
 			return;
 		}
@@ -34,7 +34,7 @@ public abstract class ClientWorldMixin {
 		if (service == null) {
 			return;
 		}
-		ClientWorld self = (ClientWorld) (Object) this;
+		ClientLevel self = (ClientLevel) (Object) this;
 		if (service.onWorldEvent(self, pos, eventId, data) == PlaybackController.Decision.CANCEL) {
 			ci.cancel();
 		}

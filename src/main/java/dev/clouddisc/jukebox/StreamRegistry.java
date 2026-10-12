@@ -3,7 +3,7 @@ package dev.clouddisc.jukebox;
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.audio.PcmAudioStream;
 import net.minecraft.client.sounds.AudioStream;
-import net.minecraft.util.Identifier;
+import net.minecraft.resources.Identifier;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

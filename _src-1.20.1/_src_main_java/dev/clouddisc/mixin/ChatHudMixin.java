@@ -3,10 +3,10 @@ package dev.clouddisc.mixin;
 import dev.clouddisc.sync.ChatTransport;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.gui.hud.ChatHud;
-import net.minecraft.client.gui.hud.MessageIndicator;
-import net.minecraft.network.message.MessageSignatureData;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.components.ChatComponent;
+import net.minecraft.client.gui.components.MessageIndicator;
+import net.minecraft.network.chat.MessageSignature;
+import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 聊天兜底通道的<b>入站</b>接缝（v0.1 里刻意留空的那一处，现在补上）。
  *
- * <p>为什么挂在 {@code ChatHud#addMessage} 而不是 {@code ClientPlayNetworkHandler#onChatMessage}：
+ * <p>为什么挂在 {@code ChatComponent#addMessage} 而不是 {@code ClientPlayNetworkHandler#onChatMessage}：
  * <ul>
  *   <li>这里是所有"要显示出来的消息"的唯一汇合点：玩家聊天、disguised chat、system chat
  *       三条分支最终都会走到它，一个点全覆盖；</li>
@@ -27,22 +27,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 服务器日志与聊天管理插件同样看得到。所以聊天通道只该当兜底用。
  */
 @Environment(EnvType.CLIENT)
-@Mixin(ChatHud.class)
+@Mixin(ChatComponent.class)
 public abstract class ChatHudMixin {
 	/** 单参数版本：系统消息等走这里。 */
-	@Inject(method = "addMessage(Lnet/minecraft/text/Text;)V", at = @At("HEAD"), cancellable = true)
-	private void clouddisc$addMessage(Text message, CallbackInfo ci) {
+	@Inject(method = "addMessage(Lnet/minecraft/text/Component;)V", at = @At("HEAD"), cancellable = true)
+	private void clouddisc$addMessage(Component message, CallbackInfo ci) {
 		hideIfOurs(message, ci);
 	}
 
 	/** 三参数版本：玩家聊天（带签名）走这里。addMessage 有多个重载，所以必须写完整描述符。 */
-	@Inject(method = "addMessage(Lnet/minecraft/text/Text;Lnet/minecraft/network/message/MessageSignatureData;Lnet/minecraft/client/gui/hud/MessageIndicator;)V",
+	@Inject(method = "addMessage(Lnet/minecraft/text/Component;Lnet/minecraft/network/message/MessageSignature;Lnet/minecraft/client/gui/hud/MessageIndicator;)V",
 			at = @At("HEAD"), cancellable = true)
-	private void clouddisc$addMessageSigned(Text message, MessageSignatureData signature, MessageIndicator indicator, CallbackInfo ci) {
+	private void clouddisc$addMessageSigned(Component message, MessageSignature signature, MessageIndicator indicator, CallbackInfo ci) {
 		hideIfOurs(message, ci);
 	}
 
-	private static void hideIfOurs(Text message, CallbackInfo ci) {
+	private static void hideIfOurs(Component message, CallbackInfo ci) {
 		if (message == null) {
 			return;
 		}

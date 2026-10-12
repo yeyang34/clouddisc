@@ -1,6 +1,6 @@
 package dev.clouddisc;
 
-import dev.clouddisc.gui.CloudDiscConfigScreen;
+// import dev.clouddisc.gui.CloudDiscConfigScreen;  // 阶段3 恢复
 import dev.clouddisc.sync.SyncService;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
@@ -107,6 +107,6 @@ public final class CloudDiscClient implements ClientModInitializer {
 	/** 打开配置界面。{@code parent} 为 null 时返回上一级由屏幕自己处理（回到游戏）。 */
 	public static void openConfigScreen(Screen parent) {
 		Minecraft client = Minecraft.getInstance();
-		client.setScreen(new CloudDiscConfigScreen(parent));
+		// client.setScreen(new CloudDiscConfigScreen(parent));
 	}
 }

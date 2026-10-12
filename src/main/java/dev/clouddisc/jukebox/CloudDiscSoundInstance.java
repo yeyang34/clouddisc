@@ -114,8 +114,8 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 	}
 
 	@Override
-	public SoundInstance.AttenuationType getAttenuationType() {
-		return SoundInstance.AttenuationType.LINEAR;
+	public SoundInstance.Attenuation getAttenuation() {
+		return SoundInstance.Attenuation.LINEAR;
 	}
 
 	@Override

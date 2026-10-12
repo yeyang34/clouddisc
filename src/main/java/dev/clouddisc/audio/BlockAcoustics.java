@@ -335,7 +335,7 @@ public final class BlockAcoustics {
 				"hay_block", "slime_block", "sculk", "gravel", "netherrack", "obsidian"};
 		for (String n : names) {
 			try {
-				net.minecraft.world.level.block.Block b = net.minecraft.registry.Registries.BLOCK.get(new net.minecraft.util.Identifier(n));
+				net.minecraft.world.level.block.Block b = net.minecraft.registry.Registries.BLOCK.get(new net.minecraft.resources.Identifier(n));
 				if (b == null) {
 					continue;
 				}

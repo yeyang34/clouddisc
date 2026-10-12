@@ -2,7 +2,7 @@ package dev.clouddisc.sync;
 
 import dev.clouddisc.CloudDiscClient;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientPlayNetworkHandler;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 
 import java.util.function.Consumer;
 
