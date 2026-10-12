@@ -266,7 +266,7 @@ public final class PlaybackController {
 		}
 		net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(pos);
 		return false /* [26.2] HAS_RECORD 已移除（JukeboxSong 体系） */
-				&& state.get(net.minecraft.world.level.block.JukeboxBlock.HAS_RECORD);
+				&& false /* [26.2] HAS_RECORD 已移除 */;
 	}
 
 	// ------------------------------------------------------------- 入口：消息
@@ -369,8 +369,8 @@ public final class PlaybackController {
 					Long last = queryCooldown.get(qKey);
 					if (last == null || nowTick - last > 60L) {
 						queryCooldown.put(qKey, nowTick);
-						CloudDiscClient.LOGGER.info("[CloudDisc] 收到未知坐标的心跳，主动询问该处会话 @ {}", BlockPos.fromLong(m.pos));
-						announcer.announceQuery(m.dim, BlockPos.fromLong(m.pos), nowTick);
+						CloudDiscClient.LOGGER.info("[CloudDisc] 收到未知坐标的心跳，主动询问该处会话 @ {}", BlockPos.of(m.pos));
+						announcer.announceQuery(m.dim, BlockPos.of(m.pos), nowTick);
 					}
 				}
 			}
@@ -731,10 +731,10 @@ public final class PlaybackController {
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
 		// 还原原版行为：屏幕下方显示"正在播放: xxx"。
-		// 原版这一句在 WorldRenderer#playSong 里 —— inGameHud.setRecordPlayingOverlay(item.getDescription())；
+		// 原版这一句在 WorldRenderer#playSong 里 —— inGameHud.setNowPlaying( /* [26.2] 改名 */item.getDescription())；
 		// 我们为了不发出原版声音会取消 1010 事件，顺带把它一起丢掉了。这里按原版的方式补回来：
 		// 同一个方法、同一个时机（真正开声的那一刻），所以观感与原版一致（淡出也由 HUD 自己管）。
-		Minecraft.getInstance().inGameHud.setRecordPlayingOverlay(
+		Minecraft.getInstance().inGameHud.setNowPlaying( /* [26.2] 改名 */
 				net.minecraft.network.chat.Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
@@ -857,7 +857,7 @@ public final class PlaybackController {
 		if (world == null || !world.dimension().location().toString().equals(h.dim)) {
 			return;
 		}
-		Item item = Item.byRawId(h.itemId);
+		Item item = Item.byId(h.itemId);
 		if (!(item instanceof RecordItem disc)) {
 			return;
 		}

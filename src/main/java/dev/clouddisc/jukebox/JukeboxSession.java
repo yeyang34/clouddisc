@@ -82,7 +82,7 @@ public final class JukeboxSession {
 	}
 
 	public BlockPos pos() {
-		return BlockPos.fromLong(packedPos);
+		return BlockPos.of(packedPos);
 	}
 
 	/** 本地播放资源的整体销毁；MC 调 AudioStream.close() 时也会走到这里。 */

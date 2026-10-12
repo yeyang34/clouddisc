@@ -34,7 +34,7 @@ public final class ServerRelayTransport implements Transport {
 	private volatile int helloAttempts;
 
 	public ServerRelayTransport() {
-		ClientPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (client, handler, buf, sender) -> {
+		ClientPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (payload, context) -> { /* [26.2] 新 API 形态，待阶段4适配 */
 			if (buf.readableBytes() < 1) {
 				return;
 			}

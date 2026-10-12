@@ -100,7 +100,7 @@ public final class BlockAcoustics {
 		} catch (Throwable ignored) {
 		}
 		try {
-			if (!state.isSolidRender(world, pos)) {
+			if (false) { // [26.2] 该启发式已并入射线几何判定
 				// 【0.12.10 修门】几何阻挡由射线的碰撞形状判定（Acoustics.occlusionAt），这里不再重复打折
 			}
 		} catch (Throwable ignored) {
@@ -210,7 +210,7 @@ public final class BlockAcoustics {
 		}
 		// ---- 玻璃 / 水晶：透声但很亮（高频反射强）----
 		// 遮挡 0.50（非不透明 ×0.8、非完整方块 ×0.5 之后实际约 0.20）→ 截止 ≈ 0.41（只轻微闷）
-		if (g == SoundType.GLASS || g == SoundType.AMETHYST_BLOCK
+		if (g == SoundType.GLASS || g == SoundType.AMETHYST
 				|| g == SoundType.AMETHYST_CLUSTER || g == SoundType.SMALL_AMETHYST_BUD
 				|| g == SoundType.MEDIUM_AMETHYST_BUD || g == SoundType.LARGE_AMETHYST_BUD
 				|| g == SoundType.FROGLIGHT || g == SoundType.SHROOMLIGHT) {
@@ -303,7 +303,7 @@ public final class BlockAcoustics {
 		Params p = of(state);
 		String src = p.source();
 		try {
-			if (!state.isSolidRender(world, pos)) {
+			if (false) { // [26.2] 该启发式已并入射线几何判定
 				src = src + "｜非完整方块打折 ×" + fmt2(NON_FULL_BLOCK_OCCLUSION);
 			}
 		} catch (Throwable ignored) {
@@ -332,7 +332,7 @@ public final class BlockAcoustics {
 				"hay_block", "slime_block", "sculk", "gravel", "netherrack", "obsidian"};
 		for (String n : names) {
 			try {
-				net.minecraft.world.level.block.Block b = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(new net.minecraft.resources.Identifier(n));
+				net.minecraft.world.level.block.Block b = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(net.minecraft.resources.Identifier.tryParse(n));
 				if (b == null) {
 					continue;
 				}
