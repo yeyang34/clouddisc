@@ -2,12 +2,12 @@ package dev.clouddisc.gui;
 
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ClickableWidget;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.BufferedReader;
@@ -93,7 +93,7 @@ public class CloudDiscConfigScreen extends Screen {
 	private List<String> textLines = List.of();
 
 	public CloudDiscConfigScreen(Screen parent) {
-		super(Text.literal("CloudDisc 云唱片"));
+		super(Component.literal("CloudDisc 云唱片"));
 		this.parent = parent;
 		CloudDiscConfig c = CloudDiscClient.config();
 		this.cfg = c != null ? c : CloudDiscConfig.get();
@@ -124,18 +124,18 @@ public class CloudDiscConfigScreen extends Screen {
 		// 底部按钮与"控件列"对齐（左边缘 = 输入框左边缘），4 个等分这条列
 		int bw = Math.max(36, (layFieldW - 3 * 4) / 4);
 		int bx = layFieldX;
-		addDrawableChild(ButtonWidget.builder(Text.literal("◀ 上一节"), b -> {
+		addDrawableChild(ButtonWidget.builder(Component.literal("◀ 上一节"), b -> {
 			section = (section + SECTION_COUNT - 1) % SECTION_COUNT;
 			scroll = 0;
 			clearAndInit();
 		}).dimensions(bx, y, bw, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("下一节 ▶"), b -> {
+		addDrawableChild(ButtonWidget.builder(Component.literal("下一节 ▶"), b -> {
 			section = (section + 1) % SECTION_COUNT;
 			scroll = 0;
 			clearAndInit();
 		}).dimensions(bx + bw + 4, y, bw, 20).build());
 
-		ButtonWidget save = ButtonWidget.builder(Text.literal("保存"), b -> {
+		ButtonWidget save = ButtonWidget.builder(Component.literal("保存"), b -> {
 			cfg.save();
 			CloudDiscClient.LOGGER.info("[CloudDisc] 配置已保存到磁盘");
 			close();
@@ -143,7 +143,7 @@ public class CloudDiscConfigScreen extends Screen {
 		save.visible = !textSection; // 只读页没有可保存的东西
 		addDrawableChild(save);
 
-		addDrawableChild(ButtonWidget.builder(Text.literal("关闭"), b -> close())
+		addDrawableChild(ButtonWidget.builder(Component.literal("关闭"), b -> close())
 				.dimensions(bx + 3 * (bw + 4), y, bw, 20).build());
 	}
 
@@ -198,7 +198,7 @@ public class CloudDiscConfigScreen extends Screen {
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
-		labels.add(new Label(Text.literal("状态: " + efx), (layLeft + 6), y));
+		labels.add(new Label(Component.literal("状态: " + efx), (layLeft + 6), y));
 	}
 
 	// ------------------------------------------------------- 第 3 节：网络与音源
@@ -227,7 +227,7 @@ public class CloudDiscConfigScreen extends Screen {
 		int y = ROW_START + index * layRowStep;
 		int maxLabelW = Math.max(24, layFieldX - 10 - (layLeft + 6));
 		String shown = this.textRenderer.trimToWidth(label, maxLabelW);
-		labels.add(new Label(Text.literal(shown), layLeft + 6, y + Math.max(1, (layRowH - 9) / 2)));
+		labels.add(new Label(Component.literal(shown), layLeft + 6, y + Math.max(1, (layRowH - 9) / 2)));
 		addDrawableChild(widget);
 	}
 
@@ -237,7 +237,7 @@ public class CloudDiscConfigScreen extends Screen {
 
 	private TextFieldWidget textField(int index, String initial, Consumer<String> set) {
 		TextFieldWidget field = new TextFieldWidget(this.textRenderer, layFieldX, rowY(index),
-				FIELD_WIDTH, 20, Text.literal(""));
+				FIELD_WIDTH, 20, Component.literal(""));
 		field.setMaxLength(200);
 		field.setText(initial == null ? "" : initial);
 		field.setChangedListener(set);
@@ -245,10 +245,10 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 
 	private ButtonWidget toggle(int index, BooleanSupplier get, Consumer<Boolean> set) {
-		return ButtonWidget.builder(Text.literal(get.getAsBoolean() ? "开" : "关"), b -> {
+		return ButtonWidget.builder(Component.literal(get.getAsBoolean() ? "开" : "关"), b -> {
 			boolean next = !get.getAsBoolean();
 			set.accept(next);
-			b.setMessage(Text.literal(next ? "开" : "关"));
+			b.setMessage(Component.literal(next ? "开" : "关"));
 		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
@@ -260,10 +260,10 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		final int[] idx = { cur };
-		return ButtonWidget.builder(Text.literal(String.valueOf(values[idx[0]])), b -> {
+		return ButtonWidget.builder(Component.literal(String.valueOf(values[idx[0]])), b -> {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
-			b.setMessage(Text.literal(String.valueOf(values[idx[0]])));
+			b.setMessage(Component.literal(String.valueOf(values[idx[0]])));
 		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
@@ -275,10 +275,10 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		final int[] idx = { cur };
-		return ButtonWidget.builder(Text.literal(fmt(values[idx[0]])), b -> {
+		return ButtonWidget.builder(Component.literal(fmt(values[idx[0]])), b -> {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
-			b.setMessage(Text.literal(fmt(values[idx[0]])));
+			b.setMessage(Component.literal(fmt(values[idx[0]])));
 		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
@@ -290,10 +290,10 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		final int[] idx = { cur };
-		return ButtonWidget.builder(Text.literal(values[idx[0]]), b -> {
+		return ButtonWidget.builder(Component.literal(values[idx[0]]), b -> {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
-			b.setMessage(Text.literal(values[idx[0]]));
+			b.setMessage(Component.literal(values[idx[0]]));
 		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
@@ -481,7 +481,7 @@ public class CloudDiscConfigScreen extends Screen {
 					context.fill(x, y + tabH - 1, x + w[i], y + tabH, 0x503A3A40);
 				}
 				int tc = active ? 0xFFFFFFFF : (hover ? 0xFFE6E6EA : 0xFF9A9AA5);
-				context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(SECTION_NAMES[i]),
+				context.drawCenteredTextWithShadow(this.textRenderer, Component.literal(SECTION_NAMES[i]),
 						x + w[i] / 2, y + 5, tc);
 				x += w[i] + gap;
 			}
@@ -490,12 +490,12 @@ public class CloudDiscConfigScreen extends Screen {
 		this.renderBackground(context);
 		context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 8, 0xFFFFFF);
 		// 标语 + 一句话定位
-		context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(CloudDiscClient.SLOGAN),
+		context.drawCenteredTextWithShadow(this.textRenderer, Component.literal(CloudDiscClient.SLOGAN),
 				this.width / 2, 18, 0xFFC840);
-		context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(CloudDiscClient.TAGLINE),
+		context.drawCenteredTextWithShadow(this.textRenderer, Component.literal(CloudDiscClient.TAGLINE),
 				this.width / 2, 28, 0x909090);
 		String header = "第 " + (section + 1) + " / " + SECTION_COUNT + " 节 · " + SECTION_NAMES[section];
-		context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(header), this.width / 2, 39, 0xA0E0A0);
+		context.drawCenteredTextWithShadow(this.textRenderer, Component.literal(header), this.width / 2, 39, 0xA0E0A0);
 
 		if (section >= SECTION_GUIDE) {
 			int perPage = linesPerPage();
@@ -511,7 +511,7 @@ public class CloudDiscConfigScreen extends Screen {
 			String hint = (scroll > 0 || maxScroll() > 0)
 					? "滚轮 / ↑↓ / PgUp PgDn 翻阅　（" + (scroll + 1) + " - " + end + " / " + textLines.size() + " 行）"
 					: "";
-			context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), this.width / 2, this.height - 40, 0x909090);
+			context.drawCenteredTextWithShadow(this.textRenderer, Component.literal(hint), this.width / 2, this.height - 40, 0x909090);
 		} else {
 			for (Label label : labels) {
 				context.drawTextWithShadow(this.textRenderer, label.text(), label.x(), label.y(), 0xE0E0E0);
