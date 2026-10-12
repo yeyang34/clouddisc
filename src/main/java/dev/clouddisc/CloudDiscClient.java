@@ -108,10 +108,10 @@ public final class CloudDiscClient implements ClientModInitializer {
 	/** 打开配置界面。{@code parent} 为 null 时返回上一级由屏幕自己处理（回到游戏）。 */
 	public static void openConfigScreen(Screen parent) {
 		Minecraft client = Minecraft.getInstance();
-		// try {
+		try {
 			client.setScreenAndShow(new CloudDiscConfigScreen(parent));
 		} catch (Throwable t) {
 			LOGGER.error("[CloudDisc] 打开配置界面失败（诊断）", t);
-		} // 阶段3 恢复
+		}
 	}
 }
