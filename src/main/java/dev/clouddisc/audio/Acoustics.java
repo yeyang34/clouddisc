@@ -11,7 +11,7 @@ import com.mojang.blaze3d.audio.Channel;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import com.mojang.blaze3d.audio.Source;
-import net.minecraft.world.level.entity.Entity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.RaycastContext;
 import net.minecraft.world.phys.HitResult;
