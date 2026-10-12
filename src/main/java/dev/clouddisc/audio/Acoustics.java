@@ -466,7 +466,7 @@ public final class Acoustics {
 						// 屋顶完全不被计入 → 被挡占比 0 → occ = 0（实测："正上方房顶是透的，远一点就挡"）。
 						Vec3 offStart = offFrom;
 						if (offLen > 1.6 && !freeAt(world, BlockPos.containing(offFrom.x, offFrom.y, offFrom.z))) {
-							offStart = offFrom.add(offDir.multiply(1.5 / offLen));
+							offStart = offFrom.add(offDir.scale(1.5 / offLen));
 						}
 						double o = occlusionAt(world, offStart, offTo, jukebox);
 						if (o < bestOffset) {
@@ -799,7 +799,7 @@ public final class Acoustics {
 			double totalDist = 0.0;
 
 			for (int b = 0; b < REVERB_BOUNCES; b++) {
-				Vec3 end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
 
 				// 【0.12.56】接收球判定（房间声学标准做法，用户提出的思路）：
@@ -813,7 +813,7 @@ public final class Acoustics {
 					if (near != null && near.distanceToSqr(ear) <= EAR_REACH * EAR_REACH) {
 						// 听者的"捕获射线"也要通（最近点到耳朵之间没有实体），
 						// 否则贴着墙站在墙外、射线在墙内掠过会被误判为听到了。
-						if (RayWalk.cast(world, near.add(ear.subtract(near).normalize().multiply(0.02)), ear, 24) == null) {
+						if (RayWalk.cast(world, near.add(ear.subtract(near).normalize().scale(0.02)), ear, 24) == null) {
 							out.earReach++;
 						}
 					}
@@ -849,7 +849,7 @@ public final class Acoustics {
 				// 只在直通被挡时才算 —— 直通通透时 openness 本来就是 1，没必要花这个钱。
 				if (occ > 0.0 && clearLineTests < MAX_CLEAR_LINE_TESTS) {
 					clearLineTests++;
-					Vec3 hp = hit.point().add(hit.normal().multiply(0.002));
+					Vec3 hp = hit.point().add(hit.normal().scale(0.002));
 					if (RayWalk.cast(world, hp, ear, MAX_CLEAR_LINE_STEPS) == null) {
 						out.earReach++;
 						sharedAirspaces++;
@@ -866,7 +866,7 @@ public final class Acoustics {
 				}
 
 				dir = reflect(dir, hit.normal());
-				origin = hit.point().add(hit.normal().multiply(0.002));
+				origin = hit.point().add(hit.normal().scale(0.002));
 			}
 		}
 
@@ -1198,7 +1198,7 @@ public final class Acoustics {
 			}
 			double t = p.subtract(a).dot(ab) / len2;
 			t = Math.max(0.0, Math.min(1.0, t));
-			return a.add(ab.multiply(t));
+			return a.add(ab.scale(t));
 		} catch (Throwable t) {
 			return null;
 		}
@@ -1225,7 +1225,7 @@ public final class Acoustics {
 			Vec3 dir = new Vec3(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
 			Vec3 origin = ear;
 			for (int b = 0; b < 3; b++) {
-				Vec3 end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit;
 				try {
 					hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
@@ -1250,8 +1250,8 @@ public final class Acoustics {
 				}
 				// 镜面反射（dir - 2(dir·n)n），与追踪器同一公式
 				double d = dir.dot(hit.normal()) * 2.0;
-				dir = dir.subtract(hit.normal().multiply(d)).normalize();
-				origin = hit.point().add(hit.normal().multiply(0.002));
+				dir = dir.subtract(hit.normal().scale(d)).normalize();
+				origin = hit.point().add(hit.normal().scale(0.002));
 			}
 			if (hits >= 3) {
 				break; // 够用了，省开销
@@ -1364,7 +1364,7 @@ public final class Acoustics {
 					continue;
 				}
 				for (int i = 0; i < 6; i++) {
-					BlockPos n = p.add(new Vec3(DX[i], DY[i], DZ[i]));
+					BlockPos n = p.add(DX[i], DY[i], DZ[i]);
 					if (dist.containsKey(n)) {
 						continue;
 					}
@@ -1485,7 +1485,7 @@ public final class Acoustics {
 				continue;
 			}
 			for (int i = 0; i < 6; i++) {
-				BlockPos n = p.add(new Vec3(DX[i], DY[i], DZ[i]));
+				BlockPos n = p.add(DX[i], DY[i], DZ[i]);
 				if (dist.containsKey(n)) {
 					continue;
 				}
