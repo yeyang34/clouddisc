@@ -521,7 +521,7 @@ public final class PlaybackController {
 			if (realEnd > 0L && playedTo > realEnd + 500L) {
 				if (cfg.loopSingle) {
 					// 【单曲循环】回到 0 秒无缝重播 ✓
-					loopBack(s, nowTick, realEnd);
+				// 【26.2】循环已交给解码管线内部 ✓ 这里不再重开声音实例 ✗（否则"没播完就重播"✗）
 					return;
 				}
 				CloudDiscClient.LOGGER.info("[CloudDisc] 已播到真实结尾（{}ms）→ 结束播放", realEnd);
@@ -536,7 +536,7 @@ public final class PlaybackController {
 		long contentNow = s.msAtStart + (nowTick - s.startedTick) * 50L;
 		if (dur > 0L && s.startedTick > 0L && contentNow > dur + 500L) {
 			if (cfg.loopSingle) {
-				loopBack(s, nowTick, dur);
+				// 【26.2】循环已交给解码管线内部 ✓ 这里不再重开声音实例 ✗（否则"没播完就重播"✗）
 			} else {
 				stopQuiet(s);
 				announcer.announceStop(s, nowTick);
