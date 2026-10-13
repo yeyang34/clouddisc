@@ -970,6 +970,18 @@ public final class PlaybackController {
 
 	private void stopQuiet(JukeboxSession s) {
 		sessions.remove(s.key);
+		// ===== 【26.2 修复 · 到结尾卡住 / 反复播最后一点】=====
+		// 只让流结束是不够的 ✗（日志实测：流结束后「引擎已消费 7627ms，缓冲积压 0ms」✗
+		//  MC 的 Channel 在没数据可放时会卡住并反复播最后那点缓冲 ✗ = 听到的「卡住 / 一秒循环」✗）
+		// 正确做法：主动把这条声音实例从声音系统里停掉 ✓ 引擎随后正常回收 OpenAL 源 ✓
+		try {
+			if (s.instance != null) {
+				Minecraft.getInstance().getSoundManager().stop(s.instance);
+				CloudDiscClient.LOGGER.info("[CloudDisc] 已主动停止声音实例（不再依赖流结束）");
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 主动停止声音实例失败（忽略）: {}", t.toString());
+		}
 		s.dispose();
 	}
 
