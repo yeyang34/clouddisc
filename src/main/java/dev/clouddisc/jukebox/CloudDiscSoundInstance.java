@@ -82,16 +82,9 @@ public final class CloudDiscSoundInstance implements SoundInstance {
 
 	@Override
 	public boolean isLooping() {
-		// 交给【原版引擎】循环（官方机制 ✓）：
-		//   isLooping=true ⇒ 引擎调用 Channel.setLooping(true) ✓
-		//   流读到末尾时我们的 PcmAudioStream.read() 返回 null ⇒ 引擎认为这一段结束 ✓
-		//   随后引擎会【再向 SoundBufferLibrary.getStream 要一条新流】✓ 我们的 SoundLoaderMixin 每次都造一条新的 ✓
-		// ⇒ 循环由原版完成，不需要我们自己 seek / 也不会有空转 ✗
-		try {
-			return dev.clouddisc.CloudDiscConfig.get().loopSingle;
-		} catch (Throwable t) {
-			return true;
-		}
+		// 【回退】不要用原版循环机制 ✗（isLooping=true 会让引擎在流结束时再要一条新流 ✗
+		// 而我们的流是一次性的 ✗ → 拿不到就整条声音都没了 ✗ 实测把播放搞坏了 ✓）
+		return false;
 	}
 
 	@Override
