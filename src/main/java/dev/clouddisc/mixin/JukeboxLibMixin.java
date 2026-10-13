@@ -14,58 +14,34 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 【内置 · 解除播放时长限制】把原来独立的 jukeboxlib 合并进主 jar（26.2 版）。
+ * 【内置 · 解除播放时长限制】（26.2 版 · 第 3 次迭代 ✓）
  *
- * <h2>原版怎么限制的</h2>
- * 1.20.1：{@code JukeboxBlockEntity#isSongFinished(disc)} 比较 gameTime ✗
- * 26.2：{@code JukeboxSongPlayer#tick} 内部用 {@code ticksSinceSongStarted} 调
- * {@code JukeboxSong#hasFinished(...)} ✓ 到点就 {@code stop()} ✗（并发 1011 ✗）
+ * <h2>迭代过程（每一步都是被实测逼出来的 ✓）</h2>
+ * <ol>
+ *   <li>v1：cancel 整个 {@code tick} ✗ → 音符粒子 / 播放事件全没了 ✗（"没有音符粒子"✗）</li>
+ *   <li>v2：tick 末尾把 {@code ticksSinceSongStarted} 写回（冻住计数）✗
+ *       → 原版粒子是按"计数取模"触发的 ✗ 计数不动 ⇒ 条件恒成立 ⇒ 每刻都喷 ✗（"粒子像喷泉"✗）</li>
+ *   <li><b>v3（本版 ✓）</b>：<b>完全不碰 tick，也不碰任何计数</b> ✗
+ *       —— 只拦 {@code stop(LevelAccessor, BlockState)}：对云唱片直接取消这次 stop ✓
+ *       ⇒ tick 照常跑（计数自然增长 ✓ 粒子按正常节奏喷 ✓）
+ *       ⇒ 只是"放完了要停"那一步被挡掉 ✓ → 不会停 ✗ 不会发 1011 ✗ → 歌能一直放 ✓</li>
+ * </ol>
  *
- * <h2>做法（本轮修正后的关键 ✓）</h2>
- * 只在 tick 的【末尾】把 {@code ticksSinceSongStarted} 按住（设回进入时的值）✓
- * 于是：原版永远认为"还没放完"✗ 不会 stop ✗ 也不会发 1011 ✗
- * 但 tick 里的【其它一切照常】✓ —— 特别是 {@code spawnMusicParticles}（音符粒子 ✓）
- * 与 {@code shouldEmitJukeboxPlayingEvent}（播放事件 ✓）。
- *
- * <p>上一版是把整个 tick 直接 cancel ✗ → 粒子/事件全没了 ✗（实测反馈："播放没有音符粒子"✗）
- * 这一版改成"只按住计时器"✓ 两者兼得 ✓
- *
- * <p>只对「云唱片」生效（唱片自定义名以 {@code @} 开头 ✓），原版唱片完全不受影响 ✓
- * 全程 try/catch ✓ 出错就让原版照常跑 ✓
+ * <p>只对「云唱片」生效（唱片自定义名以 {@code @} 开头 ✓）✓ 原版唱片完全不受影响 ✓
+ * 全程 try/catch ✓ 出错就让原版照常停 ✓
  */
 @Mixin(JukeboxSongPlayer.class)
 public abstract class JukeboxLibMixin {
 
-	@Inject(method = "tick", at = @At("HEAD"))
-	private void clouddisc$holdTicksHead(LevelAccessor level, BlockState state, CallbackInfo ci) {
+	@Inject(method = "stop", at = @At("HEAD"), cancellable = true)
+	private void clouddisc$holdStop(LevelAccessor level, BlockState state, CallbackInfo ci) {
 		try {
-			if (!clouddisc$isOurDisc(level)) {
-				return;
+			if (clouddisc$isOurDisc(level)) {
+				// 云唱片：原版认为放完了要停 → 我们挡掉 ✓（tick 与粒子完全不受影响 ✓）
+				ci.cancel();
 			}
-			// 记住进入时的计数，tick 末尾再写回去（原版这一段里加的那些都不保留）
-			JukeboxSongPlayer self = (JukeboxSongPlayer) (Object) this;
-			clouddisc$savedTicks = ((JukeboxSongPlayerAccessor) self).clouddisc$getTicksSinceSongStarted();
-			clouddisc$holding = true;
 		} catch (Throwable ignored) {
-			clouddisc$holding = false;
-		}
-	}
-
-	@Inject(method = "tick", at = @At("RETURN"))
-	private void clouddisc$holdTicksReturn(LevelAccessor level, BlockState state, CallbackInfo ci) {
-		try {
-			if (!clouddisc$holding) {
-				return;
-			}
-			clouddisc$holding = false;
-			// 只有"原版认为已经放完"时才需要按住 ✗（否则让它正常计数，粒子节奏才自然 ✓）
-			JukeboxSongPlayer self = (JukeboxSongPlayer) (Object) this;
-			JukeboxSongPlayerAccessor acc = (JukeboxSongPlayerAccessor) self;
-			// 直接写回进入时的计数 ⇒ 原版永远认为还没放完 ✗ → 不会 stop ✗ 也不发 1011 ✗
-			acc.clouddisc$setTicksSinceSongStarted(clouddisc$savedTicks);
-				acc.clouddisc$setTicksSinceSongStarted(clouddisc$savedTicks);
-		} catch (Throwable ignored) {
-			// 忽略：出错就让原版照常结束
+			// 出错就让原版照常停
 		}
 	}
 
@@ -93,10 +69,4 @@ public abstract class JukeboxLibMixin {
 			return false;
 		}
 	}
-
-	@org.spongepowered.asm.mixin.Unique
-	private long clouddisc$savedTicks;
-
-	@org.spongepowered.asm.mixin.Unique
-	private boolean clouddisc$holding;
 }
