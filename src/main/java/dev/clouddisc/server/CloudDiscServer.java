@@ -133,11 +133,15 @@ public final class CloudDiscServer implements ModInitializer {
 	 * 每次计数/转发前把"已经不在在线名单里的"清掉 ✓ 人数永远等于真实在线且装了本 Mod 的人数 ✓
 	 */
 	private static java.util.List<ServerPlayer> onlineParticipants(ServerPlayer self) {
+		// 【修复】以服务端在线名单为唯一权威 ✓ 人数永远实时 ✓
+		if (self == null || !(self.level() instanceof net.minecraft.server.level.ServerLevel sl)) {
+			return java.util.List.of();
+		}
+		net.minecraft.server.MinecraftServer server = sl.getServer();
 		if (server == null) {
 			return java.util.List.of();
 		}
 		java.util.List<ServerPlayer> online = server.getPlayerList().getPlayers();
-		// 把已经不在线的踢出参与者集合（WeakHashMap 键集合支持 removeIf ✓）
 		PARTICIPANTS.removeIf(p -> p == null || p.isRemoved() || !online.contains(p));
 		java.util.List<ServerPlayer> live = new java.util.ArrayList<>();
 		for (ServerPlayer p : online) {
