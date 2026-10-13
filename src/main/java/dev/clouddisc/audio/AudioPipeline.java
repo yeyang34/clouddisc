@@ -25,6 +25,15 @@ public final class AudioPipeline implements AutoCloseable {
 	private final Thread worker;
 	private final AtomicLong writtenBytes = new AtomicLong();
 	private volatile boolean running = true;
+
+	/** 【26.2 · 单曲循环】为 true 时，解码到结尾不结束流，而是回到 0 秒继续解码 ✓ */
+	private volatile boolean loopForever = false;
+	private volatile int loopCount = 0;
+
+	/** 由 PlaybackController 按配置 loopSingle 设置 ✓ */
+	public void setLoopForever(boolean v) { this.loopForever = v; }
+
+	public int loopCount() { return loopCount; }
 	/** 已输出音频的峰值（用于诊断"是不是被削顶了"）。 */
 	private volatile float peak;
 	private volatile boolean peakLogged;
@@ -207,10 +216,37 @@ public final class AudioPipeline implements AutoCloseable {
 				}
 
 				// 4) 补充输入
-				int n = source.read(in, in.length);
+								int n = source.read(in, in.length);
 				if (n <= 0) {
-					ring.finish();
-					return;
+					// 【26.2 · 单曲循环】关键修复：
+					// 到结尾【不能】结束这条流 ✗ —— 因为 MC 的 Channel 一旦看到 EOF，
+					// 就不再取新数据（表现为"卡在最后一秒反复响"✗ 实测踩过 ✓）。
+					// 改成在【解码管线内部】回到 0 秒继续解码 ✓ → 流永不到 EOF ✓ 无缝循环 ✓
+					if (loopForever) {
+						try {
+							source.seekSample(0L);
+							len = 0;
+							pos = 0.0;
+							ring.clear();
+							writtenBytes.set(0L);
+							appliedSeekMs = 0L;
+							requestedSeekMs = 0L;
+							loopCount++;
+							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环（管线内）：回到开头，第 {} 次", loopCount);
+							n = source.read(in, in.length);
+							if (n <= 0) {
+								ring.finish();
+								return;
+							}
+						} catch (Throwable t) {
+							CloudDiscAudio.LOG.warn("[CloudDisc] 循环回到开头失败，改为结束: {}", t.toString());
+							ring.finish();
+							return;
+						}
+					} else {
+						ring.finish();
+						return;
+					}
 				}
 				int frames = n / inChannels;
 				if (len + frames > buf.length) {
