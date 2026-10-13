@@ -15,7 +15,9 @@ public final class AudioPipeline implements AutoCloseable {
 	/** 每毫秒字节数：48000 * 2 / 1000。 */
 	public static final int BYTES_PER_MS = OUT_RATE * 2 / 1000;
 	/** 环形缓冲容量：4 秒。 */
-	public static final int RING_BYTES = BYTES_PER_MS * 4000;
+	// 【26.2】原来 4000ms 太小 ✗：开播前解码器会提前写入 ✗ 一旦绕圈就把【开头】覆盖掉 ✗
+	// （实测症状：音乐开头少一点 ✗ 结束处也少一点 ✗）→ 加到 12 秒 ✓ 留足余量 ✓
+	public static final int RING_BYTES = BYTES_PER_MS * 12000;
 
 	private final PcmSource source;
 	private final PcmRingBuffer ring;

@@ -780,8 +780,8 @@ public final class PlaybackController {
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 跳转异常: {}", t.toString());
 		}
-		long wantBytes = 1_200L * AudioPipeline.BYTES_PER_MS;
-		long deadline = System.nanoTime() + 800_000_000L;
+		long wantBytes = 2_500L * AudioPipeline.BYTES_PER_MS;
+		long deadline = System.nanoTime() + 1_500_000_000L;
 		while (pipe.ring().available() < wantBytes && System.nanoTime() < deadline) {
 			try {
 				Thread.sleep(15L);
