@@ -409,7 +409,6 @@ public class CloudDiscConfigScreen extends Screen {
 	}
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-		super.extractRenderState(context, mouseX, mouseY, delta);
 		// 【26.2】先铺一层半透明底（等价于旧 renderBackground ✓ 但必须画在最前面）
 		context.fill(0, 0, this.width, this.height, 0x40000000);
 		// ---------------- 设计层（只画装饰，不碰任何功能） ----------------
@@ -459,6 +458,8 @@ public class CloudDiscConfigScreen extends Screen {
 					context.fill(x, y + tabH - 1, x + w[i], y + tabH, 0x503A3A40);
 				}
 				int tc = active ? 0xFFFFFFFF : (hover ? 0xFFE6E6EA : 0xFF9A9AA5);
+		// 【26.2】控件要画在装饰之上、文字之下 ⇒ super 放在这里 ✓
+		super.extractRenderState(context, mouseX, mouseY, delta);
 				drawCentered(context, Component.literal(SECTION_NAMES[i]),
 						x + w[i] / 2, y + 5, tc);
 				x += w[i] + gap;
