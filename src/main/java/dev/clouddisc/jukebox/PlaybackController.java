@@ -794,6 +794,16 @@ public final class PlaybackController {
 				targetMs, pipe.ring().available() / AudioPipeline.BYTES_PER_MS, seeked ? "成功" : "超时");
 		s.msAtStart = targetMs;
 		// 交给原版声音系统：定位、音量类别、停止逻辑全部沿用原版
+		// 【诊断】开声瞬间的快照：用于定位"开头几秒被掐"
+		try {
+			CloudDiscClient.LOGGER.info("[CloudDisc] 开声快照: 目标位置={}ms 期望播放位置={}ms 缓冲={}ms 引擎已消费={}ms loopForever={}",
+					targetMs, s.msAtStart,
+					pipe.ring().available() / AudioPipeline.BYTES_PER_MS,
+					pipe.playedMs(),
+					cfg.loopSingle);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 开声快照失败: {}", t.toString());
+		}
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
 		// 还原原版行为：屏幕下方显示「正在播放: xxx」（26.2 里是 Minecraft.gui.setNowPlaying(Component) ✓）
