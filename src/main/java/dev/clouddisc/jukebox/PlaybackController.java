@@ -757,7 +757,21 @@ public final class PlaybackController {
 		s.stream = stream;
 		s.instance = instance;
 		s.startedTick = now();
-		s.msAtStart = positionMs;
+		// ===== 【26.2 修复 · 后进来的玩家听不见】=====
+		// 场景：发起方 wanpi 放歌并已循环过一轮，123 才进来 ✗
+		//   → 同步算出"应从第 178 秒开始"✗ = 第一轮末尾 ✗
+		//   → 我们的是【流式 MP3 解码】✗ 不能真跳转 ✗ seek 之后没有数据 ✗
+		//   → 实测：预缓冲只有 26ms ✗（正常 4000+ms ✓）→ 完全听不见 ✗
+		// 处理：晚进来的（位置 > 3 秒）一律【从整首开头播】✓ 保证一定出声 ✓
+		//   —— 之后每个客户端各自按自己的管线循环 ✗ 相位差会逐步体现 ✓
+		//      （要精确对齐需要能随机访问的音源 ✗ 当前流式方案做不到 ✓ 这里优先"听得到"✓）
+		long startFrom = positionMs;
+		if (positionMs > 3000L) {
+			startFrom = 0L;
+			CloudDiscClient.LOGGER.info("[CloudDisc] 后进玩家：同步位置 {}ms 无法可靠 seek（流式音源）→ 改为从整首开头播放",
+					positionMs);
+		}
+		s.msAtStart = startFrom;
 		// 交给原版声音系统：定位、音量类别、停止逻辑全部沿用原版
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
