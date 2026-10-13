@@ -3,6 +3,10 @@
   "minVersion": "0.8",
   "package": "dev.clouddisc.mixin",
   "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "JukeboxSongPlayerAccessor",
+    "JukeboxLibMixin"
+  ],
   "client": [
     "ClientWorldMixin",
     "ChatHudMixin",
@@ -11,9 +15,7 @@
     "ChannelHandleAccessor",
     "SourceMixin",
     "SoundSystemMixin",
-    "SoundLoaderMixin",
-    "JukeboxSongPlayerAccessor",
-    "JukeboxLibMixin"
+    "SoundLoaderMixin"
   ],
   "injectors": {
     "defaultRequire": 0
