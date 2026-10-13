@@ -69,7 +69,7 @@ public final class AudioPipeline implements AutoCloseable {
 			// 循环改由【原版引擎】负责（isLooping + read 返回 null）✓ 这里关闭自带循环 ✗
 			this.loopForever = false;
 		} catch (Throwable ignored) {
-			this.loopForever = true;
+			this.loopForever = false;
 		}
 
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");

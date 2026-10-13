@@ -175,7 +175,7 @@ public final class CloudDiscConfig {
 
 	/** 是否允许聊天通道作为兜底信令/数据通道。 */
 	/** 【单曲循环】一张云唱片播完后，自动回到开头继续播（默认开 ✓）。 */
-	public boolean loopSingle = true;
+	public boolean loopSingle = false;   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
 
 	public boolean enableChatRelay = true;
 	/**
