@@ -216,7 +216,7 @@ public final class AudioPipeline implements AutoCloseable {
 				}
 
 				// 4) 补充输入
-								int n = source.read(in, in.length);
+				int n = source.read(in, in.length);
 				if (n <= 0) {
 					// ===== 26.2 修复：循环不再被尾部短读误触发 =====
 					// 流式 MP3 在尾部可能返回 0（短读/欠载），原来一律当成到结尾，
@@ -264,6 +264,7 @@ public final class AudioPipeline implements AutoCloseable {
 						ring.finish();
 						return;
 					}
+				}   // ← 闭合 if (n <= 0) 块 ✓（之前漏了这个括号 ✗）
 				int frames = n / inChannels;
 				if (len + frames > buf.length) {
 					buf = java.util.Arrays.copyOf(buf, Math.max(buf.length * 2, len + frames));
