@@ -63,13 +63,11 @@ public final class AudioPipeline implements AutoCloseable {
 		this.inRate = Math.max(1, source.sampleRate());
 		this.inChannels = Math.max(1, source.channels());
 		this.outputGain = Math.max(0.05f, Math.min(2.0f, outputGain));
-		// 【26.2 根治】构造时就按配置设定：不再依赖外部 setter 是否被正确调到 ✗
-		// （实测出现过：解码到底时 loopForever=false ✗ → 不循环 ✗）
+		// 26.2 单曲循环开关：默认跟随配置 loopSingle ✓
+		// 注意：这行必须放在 try 的【正常路径】里 ✗ 放进 catch 就永远走不到 ✗（踩过）
 		try {
-			// 【暂停】管线内循环暂时关闭 ✗（实测 seekSample(0) 后位置不回 0 ✗ 会导致同秒死循环+只剩一秒 ✗）
-			// 待用正确的方式重做（重新打开音源 ✓ 而不是 seek ✓）
+			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
 		} catch (Throwable ignored) {
-			// 【暂停】连兜底也必须是 false ✗（上一版这里写着 true ✗ 于是新 jar 仍在循环 ✗）
 			this.loopForever = true;
 		}
 
