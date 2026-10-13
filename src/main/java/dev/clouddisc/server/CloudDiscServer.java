@@ -82,7 +82,7 @@ public final class CloudDiscServer implements ModInitializer {
 					sendHello(player);
 					if (firstTime) {
 						LOGGER.info("[CloudDisc] {} 接入同步中继（当前 {} 人；对端约定版本 {}，本端 {}）",
-								player.getName().getString(), onlineParticipants(context.player().getServer()).size(),
+								player.getName().getString(), onlineParticipants(player).size(),
 								clientVersion, CloudDiscNet.CONVENTION_VERSION);
 					}
 					return;
@@ -91,7 +91,7 @@ public final class CloudDiscServer implements ModInitializer {
 				// 其余一律视为会话数据：原样转发（连第 1 个字节一起转发，服务端不解释它 ✓）
 				PARTICIPANTS.add(player);
 				int sent = 0;
-				for (ServerPlayer other : onlineParticipants(context.player().getServer())) {
+				for (ServerPlayer other : onlineParticipants(player)) {
 					if (other == player) {
 						continue;
 					}
@@ -105,7 +105,7 @@ public final class CloudDiscServer implements ModInitializer {
 				if (sent > 0 && forwardLogCount < 5) {
 					forwardLogCount++;
 					LOGGER.info("[CloudDisc] 已把 {} 的同步数据转发给 {} 人（参与者共 {} 人）",
-							player.getName().getString(), sent, onlineParticipants(context.player().getServer()).size());
+							player.getName().getString(), sent, onlineParticipants(player).size());
 				}
 			} catch (Throwable t) {
 				LOGGER.debug("[CloudDisc] 中继接收处理异常（已忽略）: {}", t.toString());
@@ -116,7 +116,7 @@ public final class CloudDiscServer implements ModInitializer {
 		net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
 			ServerPlayer p = handler.getPlayer();
 			if (p != null && PARTICIPANTS.remove(p)) {
-				LOGGER.info("[CloudDisc] {} 断开，已从中继参与者移除（在线 {} 人）", p.getName().getString(), onlineParticipants(server).size());
+				LOGGER.info("[CloudDisc] {} 断开，已从中继参与者移除（在线 {} 人）", p.getName().getString(), onlineParticipants(handler.getPlayer()).size());
 			}
 		});
 
@@ -132,7 +132,7 @@ public final class CloudDiscServer implements ModInitializer {
 	 * <p>现在以【服务端在线名单】为唯一权威 ✓：
 	 * 每次计数/转发前把"已经不在在线名单里的"清掉 ✓ 人数永远等于真实在线且装了本 Mod 的人数 ✓
 	 */
-	private static java.util.List<ServerPlayer> onlineParticipants(net.minecraft.server.MinecraftServer server) {
+	private static java.util.List<ServerPlayer> onlineParticipants(ServerPlayer self) {
 		if (server == null) {
 			return java.util.List.of();
 		}
