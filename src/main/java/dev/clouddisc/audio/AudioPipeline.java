@@ -33,6 +33,8 @@ public final class AudioPipeline implements AutoCloseable {
 	/** 由 PlaybackController 按配置 loopSingle 设置 ✓ */
 	public void setLoopForever(boolean v) { this.loopForever = v; }
 
+	public boolean isLoopForever() { return loopForever; }
+
 	public int loopCount() { return loopCount; }
 	/** 已输出音频的峰值（用于诊断"是不是被削顶了"）。 */
 	private volatile float peak;
@@ -55,6 +57,14 @@ public final class AudioPipeline implements AutoCloseable {
 		this.inRate = Math.max(1, source.sampleRate());
 		this.inChannels = Math.max(1, source.channels());
 		this.outputGain = Math.max(0.05f, Math.min(2.0f, outputGain));
+		// 【26.2 根治】构造时就按配置设定：不再依赖外部 setter 是否被正确调到 ✗
+		// （实测出现过：解码到底时 loopForever=false ✗ → 不循环 ✗）
+		try {
+			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
+		} catch (Throwable ignored) {
+			this.loopForever = true;
+		}
+
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");
 		this.worker.setDaemon(true);
 		this.worker.start();

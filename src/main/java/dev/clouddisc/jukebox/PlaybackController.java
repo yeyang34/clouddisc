@@ -800,7 +800,7 @@ public final class PlaybackController {
 					targetMs, s.msAtStart,
 					pipe.ring().available() / AudioPipeline.BYTES_PER_MS,
 					pipe.playedMs(),
-					cfg.loopSingle);
+					pipe.isLoopForever());
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.debug("[CloudDisc] 开声快照失败: {}", t.toString());
 		}
