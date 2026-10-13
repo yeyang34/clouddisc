@@ -82,7 +82,7 @@ public final class CloudDiscServer implements ModInitializer {
 					sendHello(player);
 					if (firstTime) {
 						LOGGER.info("[CloudDisc] {} 接入同步中继（当前 {} 人；对端约定版本 {}，本端 {}）",
-								player.getName().getString(), PARTICIPANTS.size(),
+								player.getName().getString(), onlineParticipants(context.player().getServer()).size(),
 								clientVersion, CloudDiscNet.CONVENTION_VERSION);
 					}
 					return;
@@ -91,8 +91,8 @@ public final class CloudDiscServer implements ModInitializer {
 				// 其余一律视为会话数据：原样转发（连第 1 个字节一起转发，服务端不解释它 ✓）
 				PARTICIPANTS.add(player);
 				int sent = 0;
-				for (ServerPlayer other : PARTICIPANTS) {
-					if (other == player || other.isRemoved()) {
+				for (ServerPlayer other : onlineParticipants(context.player().getServer())) {
+					if (other == player) {
 						continue;
 					}
 					try {
@@ -105,10 +105,18 @@ public final class CloudDiscServer implements ModInitializer {
 				if (sent > 0 && forwardLogCount < 5) {
 					forwardLogCount++;
 					LOGGER.info("[CloudDisc] 已把 {} 的同步数据转发给 {} 人（参与者共 {} 人）",
-							player.getName().getString(), sent, PARTICIPANTS.size());
+							player.getName().getString(), sent, onlineParticipants(context.player().getServer()).size());
 				}
 			} catch (Throwable t) {
 				LOGGER.debug("[CloudDisc] 中继接收处理异常（已忽略）: {}", t.toString());
+			}
+		});
+
+		// 【双保险】玩家断开时立刻从参与者里移除 ✓（配合在线名单校验 ✓ 人数绝对实时 ✓）
+		net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			ServerPlayer p = handler.getPlayer();
+			if (p != null && PARTICIPANTS.remove(p)) {
+				LOGGER.info("[CloudDisc] {} 断开，已从中继参与者移除（在线 {} 人）", p.getName().getString(), onlineParticipants(server).size());
 			}
 		});
 
@@ -116,6 +124,29 @@ public final class CloudDiscServer implements ModInitializer {
 				CloudDiscNet.RELAY);
 	}
 
+	/**
+	 * 【修复 · 中继人数不是实时的问题】
+	 * 原来只用 WeakHashMap 的键集合 ✗ 但服务端会长期持有 ServerPlayer 对象 ✗
+	 * → 玩家退出后条目仍留着 ✗ → 人数只增不减 ✗（实测：3 人在线显示 8 ✗）
+	 *
+	 * <p>现在以【服务端在线名单】为唯一权威 ✓：
+	 * 每次计数/转发前把"已经不在在线名单里的"清掉 ✓ 人数永远等于真实在线且装了本 Mod 的人数 ✓
+	 */
+	private static java.util.List<ServerPlayer> onlineParticipants(net.minecraft.server.MinecraftServer server) {
+		if (server == null) {
+			return java.util.List.of();
+		}
+		java.util.List<ServerPlayer> online = server.getPlayerList().getPlayers();
+		// 把已经不在线的踢出参与者集合（WeakHashMap 键集合支持 removeIf ✓）
+		PARTICIPANTS.removeIf(p -> p == null || p.isRemoved() || !online.contains(p));
+		java.util.List<ServerPlayer> live = new java.util.ArrayList<>();
+		for (ServerPlayer p : online) {
+			if (PARTICIPANTS.contains(p)) {
+				live.add(p);
+			}
+		}
+		return live;
+	}
 	private static void sendHello(ServerPlayer player) {
 		try {
 			ServerPlayNetworking.send(player, new CloudDiscRelayPayload(
