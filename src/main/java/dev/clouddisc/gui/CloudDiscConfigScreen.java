@@ -383,6 +383,30 @@ public class CloudDiscConfigScreen extends Screen {
 
 	// ------------------------------------------------------------ 渲染
 
+	// ===== 【26.2 关键修复】界面文字必须走 ActiveTextCollector（textRenderer()）=====
+	// 26.2 的 GuiGraphicsExtractor.text(...)/centeredText(...) 只登记"可交互/悬停文字"✗
+	// 所以之前界面上一个字都看不到 ✗ 正门是 textRenderer().accept(...) ✓
+	// 这两个 helper 的参数形状与旧调用【完全一致】（只是省掉了 font ✓）→ 调用点可以整体替换 ✓
+	private void drawText(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			net.minecraft.network.chat.Component text, int x, int y, int color) {
+		ctx.textRenderer().accept(x, y, text);
+	}
+
+	private void drawText(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			String text, int x, int y, int color) {
+		ctx.textRenderer().accept(x, y, net.minecraft.network.chat.Component.literal(text));
+	}
+
+	private void drawCentered(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			net.minecraft.network.chat.Component text, int centerX, int y, int color) {
+		ctx.textRenderer().accept(net.minecraft.client.gui.TextAlignment.CENTER, centerX, y, text);
+	}
+
+	private void drawCentered(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			String text, int centerX, int y, int color) {
+		ctx.textRenderer().accept(net.minecraft.client.gui.TextAlignment.CENTER, centerX, y,
+				net.minecraft.network.chat.Component.literal(text));
+	}
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
 		super.extractRenderState(context, mouseX, mouseY, delta);
@@ -435,21 +459,21 @@ public class CloudDiscConfigScreen extends Screen {
 					context.fill(x, y + tabH - 1, x + w[i], y + tabH, 0x503A3A40);
 				}
 				int tc = active ? 0xFFFFFFFF : (hover ? 0xFFE6E6EA : 0xFF9A9AA5);
-				context.centeredText(this.font, Component.literal(SECTION_NAMES[i]),
+				drawCentered(context, Component.literal(SECTION_NAMES[i]),
 						x + w[i] / 2, y + 5, tc);
 				x += w[i] + gap;
 			}
 		}
 		// ---------------- 装饰到此为止，下面全是原有绘制 ----------------
 		// 【26.2 修复】原来这行不透明遮罩画在所有文字之后 → 把 UI 盖住（表现为「界面没有文字」）✗ 已挪到方法最前面 ✓
-		context.centeredText(this.font, this.title, this.width / 2, 8, 0xFFFFFF);
+		drawCentered(context, this.title, this.width / 2, 8, 0xFFFFFF);
 		// 标语 + 一句话定位
-		context.centeredText(this.font, Component.literal(CloudDiscClient.SLOGAN),
+		drawCentered(context, Component.literal(CloudDiscClient.SLOGAN),
 				this.width / 2, 18, 0xFFC840);
-		context.centeredText(this.font, Component.literal(CloudDiscClient.TAGLINE),
+		drawCentered(context, Component.literal(CloudDiscClient.TAGLINE),
 				this.width / 2, 28, 0x909090);
 		String header = "第 " + (section + 1) + " / " + SECTION_COUNT + " 节 · " + SECTION_NAMES[section];
-		context.centeredText(this.font, Component.literal(header), this.width / 2, 39, 0xA0E0A0);
+		drawCentered(context, Component.literal(header), this.width / 2, 39, 0xA0E0A0);
 
 		if (section >= SECTION_GUIDE) {
 			int perPage = linesPerPage();
@@ -459,16 +483,16 @@ public class CloudDiscConfigScreen extends Screen {
 				String line = textLines.get(i);
 				// 小节标题（用 ═ 或 ─ 包起来的行）高亮一下，便于扫读
 				int color = line.startsWith("═") || line.startsWith("─") ? 0x9FE08A : 0xE0E0E0;
-				context.text(this.font, line, 20, y, color);
+				drawText(context, line, 20, y, color);
 				y += TEXT_LINE_HEIGHT;
 			}
 			String hint = (scroll > 0 || maxScroll() > 0)
 					? "滚轮 / ↑↓ / PgUp PgDn 翻阅　（" + (scroll + 1) + " - " + end + " / " + textLines.size() + " 行）"
 					: "";
-			context.centeredText(this.font, Component.literal(hint), this.width / 2, this.height - 40, 0x909090);
+			drawCentered(context, Component.literal(hint), this.width / 2, this.height - 40, 0x909090);
 		} else {
 			for (Label label : labels) {
-				context.text(this.font, label.text(), label.x(), label.y(), 0xE0E0E0);
+				drawText(context, label.text(), label.x(), label.y(), 0xE0E0E0);
 			}
 		}
 		// 【26.2】super 必须最先调用（它画界面底色），否则会把我们画的文字全盖住 ✗
