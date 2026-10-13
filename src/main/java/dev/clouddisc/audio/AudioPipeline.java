@@ -66,7 +66,8 @@ public final class AudioPipeline implements AutoCloseable {
 		// 26.2 单曲循环开关：默认跟随配置 loopSingle ✓
 		// 注意：这行必须放在 try 的【正常路径】里 ✗ 放进 catch 就永远走不到 ✗（踩过）
 		try {
-			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
+			// 循环改由【原版引擎】负责（isLooping + read 返回 null）✓ 这里关闭自带循环 ✗
+			this.loopForever = false;
 		} catch (Throwable ignored) {
 			this.loopForever = true;
 		}

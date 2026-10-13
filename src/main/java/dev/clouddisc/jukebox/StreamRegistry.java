@@ -18,6 +18,26 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class StreamRegistry {
 	private static final Map<Identifier, AudioStream> STREAMS = new ConcurrentHashMap<>();
+
+	/** 流工厂：原版引擎在"流结束要下一段"时会再向我们要一次 ✓ 所以得能重复生产 ✓ */
+	private static final java.util.Map<Identifier, java.util.function.Supplier<AudioStream>> FACTORIES = new java.util.concurrent.ConcurrentHashMap<>();
+
+	public static void putFactory(Identifier id, java.util.function.Supplier<AudioStream> factory) { FACTORIES.put(id, factory); }
+
+	/** 引擎每次来要流都调它：优先用工厂造一条新的 ✓ 否则退回一次性那份 ✓ */
+	public static AudioStream supply(Identifier id) {
+		java.util.function.Supplier<AudioStream> f = FACTORIES.get(id);
+		if (f != null) {
+			try {
+				AudioStream s = f.get();
+				if (s != null) {
+					return s;
+				}
+			} catch (Throwable ignored) {
+			}
+		}
+		return take(id);
+	}
 	private static final AtomicInteger COUNTER = new AtomicInteger();
 
 	private StreamRegistry() {

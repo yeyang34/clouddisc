@@ -29,7 +29,7 @@ public class SoundLoaderMixin {
 	private void clouddisc$getStream(Identifier id, boolean repeatInstantly,
 			CallbackInfoReturnable<CompletableFuture<AudioStream>> cir) {
 		try {
-			AudioStream stream = StreamRegistry.take(id);
+			AudioStream stream = StreamRegistry.supply(id);
 			if (stream != null) {
 				cir.setReturnValue(CompletableFuture.completedFuture(stream));
 			}
