@@ -47,8 +47,9 @@ public final class PcmAudioStream implements AudioStream {
 		int n = ring.read(scratch, 0, size, timeoutMs);
 		direct.clear();
 		if (n < 0) {
-			// 真 EOF：返回空缓冲，MC 会正常收尾并释放 OpenAL source
-			return direct;
+			// 真 EOF：按原版契约返回 null = 这一段/这条流结束 ✓
+			// （返回空缓冲 ✗ 会让 OpenAL 反复播上一个缓冲 ⇒ 听感是"播一会自己跳回开头"✗ 实测踩过 ✓）
+			return null;
 		}
 		if (n == 0) {
 			// 欠载：返回 null —— 1.20.1 的 Channel.pumpBuffers 会安全跳过这一轮，
