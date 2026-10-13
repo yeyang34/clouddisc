@@ -261,12 +261,8 @@ public final class AudioPipeline implements AutoCloseable {
 						// 做法：关掉旧音源，用工厂新建一个，从第 0 帧重新解码
 						// 下面旧块里那句 seekSample(0) 会作用在【新音源】上 = 本来就是 0 帧，完全无害
 						if (sourceFactory != null) {
-							long nowN = System.nanoTime();
-							if (lastLoopNanos != 0L && nowN - lastLoopNanos < 1_000_000_000L) {
-								CloudDiscAudio.LOG.error("[CloudDisc] 循环过于频繁（不足 1 秒）-> 判定异常，结束播放");
-								ring.finish();
-								return;
-							}
+							// 不用墙钟做"循环太频繁"判断：解码远快于实时，7 秒的歌约 50ms 就解完，墙钟会误判
+							// 防空转由下面"重开音源后仍读不到数据就结束"兜住，足够了
 							PcmSource fresh = null;
 							try {
 								fresh = sourceFactory.get();
@@ -283,7 +279,7 @@ public final class AudioPipeline implements AutoCloseable {
 							} catch (Throwable ignored) {
 							}
 							source = fresh;
-							lastLoopNanos = nowN;
+							lastLoopNanos = System.nanoTime();
 							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环：已重新打开音源，回到开头");
 						} else {
 							CloudDiscAudio.LOG.warn("[CloudDisc] 没有音源工厂，退回到 seek 方式（可能不准）");
