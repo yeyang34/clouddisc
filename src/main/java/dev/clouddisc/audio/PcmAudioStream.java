@@ -54,7 +54,9 @@ public final class PcmAudioStream implements AudioStream {
 			// 欠载：返回 null —— 1.20.1 的 Channel.pumpBuffers 会安全跳过这一轮，
 			// 下一轮再要数据。绝不返回空缓冲（那会被当成结束），也绝不抛异常
 			// （抛了只会记一条日志然后彻底停止 pump，声音就没了）。
-			return null;
+			// 回退到原版正常契约：结束时返回【空缓冲】✓
+			// （返回 null 会让引擎以为"这一段结束"从而可能重新要流/重放开头 ✗ 实测出现"突然从头播放"✗）
+			return direct;
 		}
 		direct.put(scratch, 0, n);
 		direct.flip();
