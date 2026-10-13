@@ -70,7 +70,7 @@ public final class AudioPipeline implements AutoCloseable {
 			// 待用正确的方式重做（重新打开音源 ✓ 而不是 seek ✓）
 		} catch (Throwable ignored) {
 			// 【暂停】连兜底也必须是 false ✗（上一版这里写着 true ✗ 于是新 jar 仍在循环 ✗）
-			this.loopForever = true;
+			this.loopForever = false;   // 循环暂缓：旧 seek 实现会空转/只剩一秒
 		}
 
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");
