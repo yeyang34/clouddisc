@@ -767,43 +767,11 @@ public final class PlaybackController {
 		//      （要精确对齐需要能随机访问的音源 ✗ 当前流式方案做不到 ✓ 这里优先"听得到"✓）
 		long startFrom = positionMs;
 		if (positionMs > 3000L) {
-		// ===== 【26.2 正确做法 · 真正同步（不是从头放）】=====
-		// 我们的是流式 MP3 ✗ 不能随机访问 ✗ 但解码器【支持"解码并丢弃到指定位置"】✓
-		// （Mp3PcmSource.seekSample ✓ 内部 while (positionSample() < target) 边解边丢 ✓）
-		// 之前失败的原因是：seek 是异步的 ✗ 我们没等它填满缓冲就开声了 ✗
-		//   → 实测"请求位置 178150ms / 实际 178150ms"但【预缓冲只有 26ms】✗ → 没声音 ✗
-		// 正确流程 ✓：
-		//   ① 阻塞式请求 seek 到目标位置（最多等 20 秒 ✓）
-		//   ② 再等环形缓冲攒够 ~1.5 秒数据（最多再等 20 秒 ✓）
-		//   ③ 才把声音实例交给原版引擎 ✓ → 一开声就是"那个位置"的内容 ✓ = 真同步 ✓
-		long targetMs = Math.max(0L, positionMs);
-		boolean seeked;
-		try {
-			seeked = s.pipeline.requestSeekBlocking(targetMs, 20_000L);
-		} catch (Throwable t) {
-			seeked = false;
+			startFrom = 0L;
+			CloudDiscClient.LOGGER.info("[CloudDisc] 后进玩家：同步位置 {}ms 无法可靠 seek（流式音源）→ 改为从整首开头播放",
+					positionMs);
 		}
-		if (!seeked) {
-			CloudDiscClient.LOGGER.warn("[CloudDisc] 跳转到 {}ms 超时（流式音源解码慢）→ 从当前位置开始，进度会慢慢追上",
-					targetMs);
-		}
-		// 等预缓冲（1.5 秒 ≈ 1500 * BYTES_PER_MS 字节 ✓）
-		long wantBytes = 1500L * AudioPipeline.BYTES_PER_MS;
-		long t0 = System.nanoTime();
-		while (s.pipeline.ring().available() < wantBytes
-				&& (System.nanoTime() - t0) < 20_000_000_000L
-				&& !s.pipeline.ring().isFinished()) {
-			try {
-				Thread.sleep(20L);
-			} catch (InterruptedException ie) {
-				Thread.currentThread().interrupt();
-				break;
-			}
-		}
-		CloudDiscClient.LOGGER.info("[CloudDisc] 同步就绪: 目标 {}ms 预缓冲 {}ms（跳转{}）",
-				targetMs, s.pipeline.ring().available() / AudioPipeline.BYTES_PER_MS,
-				seeked ? "成功" : "超时");
-		s.msAtStart = targetMs;
+		s.msAtStart = startFrom;
 		// 交给原版声音系统：定位、音量类别、停止逻辑全部沿用原版
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
