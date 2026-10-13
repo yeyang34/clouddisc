@@ -70,7 +70,7 @@ public final class AudioPipeline implements AutoCloseable {
 			// 待用正确的方式重做（重新打开音源 ✓ 而不是 seek ✓）
 		} catch (Throwable ignored) {
 			// 【暂停】连兜底也必须是 false ✗（上一版这里写着 true ✗ 于是新 jar 仍在循环 ✗）
-			this.loopForever = false;   // 循环暂缓：旧 seek 实现会空转/只剩一秒
+			this.loopForever = true;
 		}
 
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");
@@ -258,6 +258,38 @@ public final class AudioPipeline implements AutoCloseable {
 						continue;
 					}
 					if (loopForever) {
+						// ===== 26.2 正确的单曲循环：重新打开音源 =====
+						// 为什么不用 seek：实测 seekSample(0) 后位置回不到 0，会空转且只剩一秒
+						// 做法：关掉旧音源，用工厂新建一个，从第 0 帧重新解码
+						// 下面旧块里那句 seekSample(0) 会作用在【新音源】上 = 本来就是 0 帧，完全无害
+						if (sourceFactory != null) {
+							long nowN = System.nanoTime();
+							if (lastLoopNanos != 0L && nowN - lastLoopNanos < 1_000_000_000L) {
+								CloudDiscAudio.LOG.error("[CloudDisc] 循环过于频繁（不足 1 秒）-> 判定异常，结束播放");
+								ring.finish();
+								return;
+							}
+							PcmSource fresh = null;
+							try {
+								fresh = sourceFactory.get();
+							} catch (Throwable t) {
+								CloudDiscAudio.LOG.warn("[CloudDisc] 重新打开音源失败: {}", t.toString());
+							}
+							if (fresh == null) {
+								CloudDiscAudio.LOG.warn("[CloudDisc] 无法重新打开音源 -> 结束播放（该音源不支持循环）");
+								ring.finish();
+								return;
+							}
+							try {
+								source.close();
+							} catch (Throwable ignored) {
+							}
+							source = fresh;
+							lastLoopNanos = nowN;
+							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环：已重新打开音源，回到开头");
+						} else {
+							CloudDiscAudio.LOG.warn("[CloudDisc] 没有音源工厂，退回到 seek 方式（可能不准）");
+						}
 						try {
 							source.seekSample(0L);
 							len = 0;

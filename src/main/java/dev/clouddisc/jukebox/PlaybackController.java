@@ -644,9 +644,10 @@ public final class PlaybackController {
 			CloudDiscClient.LOGGER.info("[CloudDisc] 已就绪: {}（{} Hz / {} 声道 / 时长 {}ms）",
 					file.getFileName(), source.sampleRate(), source.channels(), source.durationMillis());
 			AudioPipeline pipe = new AudioPipeline(source, cfg.outputGain);
-		// 26.2 把重新打开音源的能力交给管线，单曲循环靠它实现（不用 seek）
+		// 26.2 把重新打开音源的能力交给管线，单曲循环靠它实现
 		final Path loopFileRef = file;
 		pipe.setSourceFactory(() -> openSource(loopFileRef));
+		// 26.2 把重新打开音源的能力交给管线，单曲循环靠它实现（不用 seek）
 			// 先把"开头"预缓冲好。正常情况（大家都按时准备好）开声时是零延迟的。
 			boolean ok = pipe.awaitPrebuffer(cfg.prebufferMs, 15_000L);
 			if (!ok) {
