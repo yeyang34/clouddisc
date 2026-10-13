@@ -263,9 +263,25 @@ public final class AudioPipeline implements AutoCloseable {
 							loopCount++;
 							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环（管线内）：回到开头，第 {} 次", loopCount);
 							n = source.read(in, in.length);
+							// 【26.2 修复 · 循环只挑一秒】回到开头后如果【一时读不到】✗
+							// 千万不要 ring.finish() ✗✗ —— 那会让 MC 的 Channel 反复播它队列里最后 1 秒 ✗
+							// 改为：小睡后重试（最多 40 次 ≈ 2 秒）✓ 仍不行就先写 100ms 静音垫住 ✓ 继续重试 ✓
+							int retry = 0;
+							while (n <= 0 && retry < 40 && running) {
+								retry++;
+								try {
+									Thread.sleep(50L);
+								} catch (InterruptedException ie) {
+									Thread.currentThread().interrupt();
+									break;
+								}
+								n = source.read(in, in.length);
+							}
 							if (n <= 0) {
-								ring.finish();
-								return;
+								CloudDiscAudio.LOG.warn("[CloudDisc] 循环后暂读不到数据（重试 {} 次）→ 写 100ms 静音垫住并继续重试，绝不结束流", retry);
+								int pad = (int) (100L * BYTES_PER_MS);
+								ring.write(new byte[pad], 0, pad);
+								continue;
 							}
 						} catch (Throwable t) {
 							CloudDiscAudio.LOG.warn("[CloudDisc] 循环回到开头失败，改为结束: {}", t.toString());
