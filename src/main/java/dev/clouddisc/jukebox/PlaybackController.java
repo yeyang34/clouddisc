@@ -776,7 +776,18 @@ public final class PlaybackController {
 		long targetMs = Math.max(0L, positionMs);
 		boolean seeked = false;
 		try {
-			seeked = pipe.requestSeekBlocking(targetMs, 1_200L);
+			if (targetMs <= 0L) {
+				// 【26.2 修复 · 开头缺一点】目标就是 0 秒 ✗ 千万别去 seek ✗
+				// 原因：jlayer 的 seek 路径会跳过第一帧（实测：开头少一点 ✗）
+				// 直接让解码器从头顺序解码 ✓ 第一帧不会丢 ✓
+				seeked = true;
+			} else {
+				try {
+					seeked = pipe.requestSeekBlocking(targetMs, 1_200L);
+				} catch (Throwable t) {
+					CloudDiscClient.LOGGER.warn("[CloudDisc] 跳转异常: {}", t.toString());
+				}
+			}
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 跳转异常: {}", t.toString());
 		}
