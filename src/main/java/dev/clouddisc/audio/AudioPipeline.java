@@ -281,6 +281,17 @@ public final class AudioPipeline implements AutoCloseable {
 							source = fresh;
 							lastLoopNanos = System.nanoTime();
 							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环：已重新打开音源，回到开头");
+							// ★ 关键：重开成功后必须【跳过旧块】✗
+							// 旧块里有 ring.clear() ✗ 会把刚解码出的音频立刻清空 ✗
+							// → 环形缓冲永远不满 → 不被阻塞 → 同一秒内空转几百次 ✗（实测 359 次/秒 ✗）
+							// 直接 continue：让循环体重新开始，从新音源继续解码 ✓
+							len = 0;
+							pos = 0.0;
+							ring.clear();
+							writtenBytes.set(0L);
+							appliedSeekMs = 0L;
+							requestedSeekMs = 0L;
+							continue;
 						} else {
 							CloudDiscAudio.LOG.warn("[CloudDisc] 没有音源工厂，退回到 seek 方式（可能不准）");
 						}
