@@ -19,7 +19,11 @@ public final class AudioPipeline implements AutoCloseable {
 	// （实测症状：音乐开头少一点 ✗ 结束处也少一点 ✗）→ 加到 12 秒 ✓ 留足余量 ✓
 	public static final int RING_BYTES = BYTES_PER_MS * 12000;
 
-	private final PcmSource source;
+	private PcmSource source;   // 26.2 改成可变：循环时用工厂重新打开音源
+	private java.util.function.Supplier<PcmSource> sourceFactory;
+	private volatile long lastLoopNanos = 0L;
+
+	public void setSourceFactory(java.util.function.Supplier<PcmSource> f) { this.sourceFactory = f; }
 	private final PcmRingBuffer ring;
 	private final int inRate;
 	private final int inChannels;
@@ -66,7 +70,7 @@ public final class AudioPipeline implements AutoCloseable {
 			// 待用正确的方式重做（重新打开音源 ✓ 而不是 seek ✓）
 		} catch (Throwable ignored) {
 			// 【暂停】连兜底也必须是 false ✗（上一版这里写着 true ✗ 于是新 jar 仍在循环 ✗）
-			this.loopForever = false;
+			this.loopForever = true;
 		}
 
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");
