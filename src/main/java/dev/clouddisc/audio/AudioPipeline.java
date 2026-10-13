@@ -218,10 +218,27 @@ public final class AudioPipeline implements AutoCloseable {
 				// 4) 补充输入
 								int n = source.read(in, in.length);
 				if (n <= 0) {
-					// 【26.2 · 单曲循环】关键修复：
-					// 到结尾【不能】结束这条流 ✗ —— 因为 MC 的 Channel 一旦看到 EOF，
-					// 就不再取新数据（表现为"卡在最后一秒反复响"✗ 实测踩过 ✓）。
-					// 改成在【解码管线内部】回到 0 秒继续解码 ✓ → 流永不到 EOF ✓ 无缝循环 ✓
+					// ===== 26.2 修复：循环不再被尾部短读误触发 =====
+					// 流式 MP3 在尾部可能返回 0（短读/欠载），原来一律当成到结尾，
+					// 于是最后那一小截没播完就回到开头（实测反馈：剩一点就被掐断重播）。
+					// 新判据：只有【已解码位置 >= 已知总长】才算真到结尾。
+					long posF = -1L, totF = -1L, durMs = -1L;
+					try { posF = source.positionSample(); totF = source.totalSamples(); durMs = source.durationMillis(); } catch (Throwable ig) { }
+					boolean reallyEnd;
+					if (totF > 0) {
+						reallyEnd = posF >= totF - (long) inRate;
+					} else if (durMs > 0) {
+						reallyEnd = posF >= (durMs - 1000L) * inRate / 1000L;
+					} else {
+						reallyEnd = true;
+					}
+					CloudDiscAudio.LOG.info("[CloudDisc] 解码到底: n={} 位置={}帧 总帧={} 时长={}ms 真结尾={} loopForever={}",
+							n, posF, totF, durMs, reallyEnd, loopForever);
+					if (!reallyEnd) {
+						// 只是暂时读不到：等一下继续读，绝不回开头
+						try { Thread.sleep(5L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+						continue;
+					}
 					if (loopForever) {
 						try {
 							source.seekSample(0L);
@@ -247,7 +264,6 @@ public final class AudioPipeline implements AutoCloseable {
 						ring.finish();
 						return;
 					}
-				}
 				int frames = n / inChannels;
 				if (len + frames > buf.length) {
 					buf = java.util.Arrays.copyOf(buf, Math.max(buf.length * 2, len + frames));
