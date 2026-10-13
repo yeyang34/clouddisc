@@ -499,6 +499,69 @@ public class CloudDiscConfigScreen extends Screen {
 		// 【26.2】super 必须最先调用（它画界面底色），否则会把我们画的文字全盖住 ✗
 	}
 
+	/**
+	 * 【26.2】教程页 / 更新日志页：滚轮翻页。
+	 * 签名来自 javap 实测：mouseScrolled(double,double,double,double) ✓
+	 */
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		try {
+			if (section >= SECTION_GUIDE) {
+				int perPage = linesPerPage();
+				int max = maxScroll();
+				if (scrollY < 0) {
+					scroll = Math.min(max, scroll + 1);
+				} else if (scrollY > 0) {
+					scroll = Math.max(0, scroll - 1);
+				}
+				CloudDiscClient.LOGGER.info("[CloudDisc] 配置界面滚轮: scrollY={} → scroll={}/{}（共 {} 行，每页 {}）",
+						scrollY, scroll, max, textLines.size(), perPage);
+				return true;
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 滚轮处理异常: {}", t.toString());
+		}
+		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+	}
+
+	/**
+	 * 【26.2】教程页 / 更新日志页：↑↓ / PgUp / PgDn 翻页。
+	 * 签名来自 javap 实测：keyPressed(net.minecraft.client.input.KeyEvent) ✓
+	 * KeyEvent 访问器：key() / scancode() / modifiers() ✓
+	 */
+	@Override
+	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+		try {
+			if (section >= SECTION_GUIDE) {
+				int k = event.key();
+				int perPage = linesPerPage();
+				int max = maxScroll();
+				boolean changed = true;
+				if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_DOWN) {
+					scroll = Math.min(max, scroll + 1);
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_UP) {
+					scroll = Math.max(0, scroll - 1);
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_DOWN) {
+					scroll = Math.min(max, scroll + Math.max(1, perPage - 1));
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP) {
+					scroll = Math.max(0, scroll - Math.max(1, perPage - 1));
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_HOME) {
+					scroll = 0;
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_END) {
+					scroll = max;
+				} else {
+					changed = false;
+				}
+				if (changed) {
+					CloudDiscClient.LOGGER.info("[CloudDisc] 配置界面按键翻页: key={} → scroll={}/{}", k, scroll, max);
+					return true;
+				}
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 按键处理异常: {}", t.toString());
+		}
+		return super.keyPressed(event);
+	}
 	@Override
 	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
 		// 【26.2】顶部胶囊标签栏是手绘的（不是控件）→ 必须在这里手动命中判定 ✓
