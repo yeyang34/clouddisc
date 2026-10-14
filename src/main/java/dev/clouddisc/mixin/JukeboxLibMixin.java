@@ -1,5 +1,6 @@
 package dev.clouddisc.mixin;
 
+import dev.clouddisc.CloudDiscClient;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.JukeboxSongPlayer;
@@ -59,7 +60,15 @@ public abstract class JukeboxLibMixin {
 			if (!(be instanceof JukeboxBlockEntity jb)) {
 				return false;
 			}
-			ItemStack stack = jb.getTheItem();
+			// 【26.2 修正】getTheItem() 很可能是"要弹出的那件"（播放中为空）✗
+			// 这里改用容器槽位 0（唱片机里那张碟 ✓）
+			ItemStack stack = jb.getItem(0);
+			if (stack == null || stack.isEmpty()) {
+				stack = jb.getTheItem();
+			}
+			CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁判断: 唱片名={} 是否云唱片={}",
+					(stack == null ? "空" : stack.getHoverName().getString()),
+					(stack != null && !stack.isEmpty() && stack.getHoverName().getString().startsWith("@")));
 			if (stack == null || stack.isEmpty()) {
 				return false;
 			}
