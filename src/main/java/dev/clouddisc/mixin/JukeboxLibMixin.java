@@ -36,13 +36,20 @@ public abstract class JukeboxLibMixin {
 
 	@Inject(method = "stop", at = @At("HEAD"), cancellable = true)
 	private void clouddisc$holdStop(LevelAccessor level, BlockState state, CallbackInfo ci) {
+		// ★ 这里必须是第一行：任何异常都要先留下痕迹（之前日志放在 try 里，抛异常就被吞掉，什么都看不到 ✗）
+		boolean ours = false;
 		try {
-			if (clouddisc$isOurDisc(level)) {
-				// 云唱片：原版认为放完了要停 → 我们挡掉 ✓（tick 与粒子完全不受影响 ✓）
+			ours = clouddisc$isOurDisc(level);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 时长解锁判断异常（照常放行原版 stop）: {}", t.toString());
+		}
+		try {
+			CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁: stop 被调用 是否云唱片={}", ours);
+			if (ours) {
 				ci.cancel();
 			}
-		} catch (Throwable ignored) {
-			// 出错就让原版照常停
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 时长解锁拦截失败（照常放行）: {}", t.toString());
 		}
 	}
 
