@@ -34,6 +34,27 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(JukeboxSongPlayer.class)
 public abstract class JukeboxLibMixin {
 
+	/**
+	 * 【二分定位】证明这个 mixin 到底有没有被应用：
+	 *   有这行日志 ⇒ mixin 生效 ✓（那 stop 没日志说明停止走了别的路径 ✗）
+	 *   没这行日志 ⇒ mixin 压根没应用 ✗（要查 mixin 配置/环境 ✗）
+	 * 每 5 秒最多打一条，避免刷屏 ✓
+	 */
+	@org.spongepowered.asm.mixin.Unique
+	private static long clouddisc$lastProbe = 0L;
+
+	@Inject(method = "tick", at = @At("HEAD"))
+	@org.spongepowered.asm.mixin.Unique
+	private void clouddisc$probeTick(LevelAccessor level, BlockState state, CallbackInfo ci) {
+		try {
+			long now = System.currentTimeMillis();
+			if (now - clouddisc$lastProbe > 5000L) {
+				clouddisc$lastProbe = now;
+				CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁·探针: JukeboxSongPlayer.tick 正在跑（mixin 已生效 ✓）");
+			}
+		} catch (Throwable ignored) {
+		}
+	}
 	@Inject(method = "stop", at = @At("HEAD"), cancellable = true)
 	private void clouddisc$holdStop(LevelAccessor level, BlockState state, CallbackInfo ci) {
 		// ★ 这里必须是第一行：任何异常都要先留下痕迹（之前日志放在 try 里，抛异常就被吞掉，什么都看不到 ✗）
