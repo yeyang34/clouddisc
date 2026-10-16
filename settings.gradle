@@ -12,4 +12,4 @@ pluginManagement {
 rootProject.name = 'clouddisc'
 
 // 可选附加组件：产出独立的 lib jar（解除唱片时长限制）
-include 'jukeboxlib'
+// 26.2 移植期间先摘掉：include 'jukeboxlib'

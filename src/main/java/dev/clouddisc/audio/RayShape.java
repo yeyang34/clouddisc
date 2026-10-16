@@ -1,9 +1,9 @@
 package dev.clouddisc.audio;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.List;
 
@@ -15,7 +15,7 @@ import java.util.List;
  * <ul>
  *   <li>{@code from}/{@code to} 必须是<b>世界坐标</b>；{@code pos} 是这一格的方块坐标。</li>
  *   <li>{@code VoxelShape.raycast(from, to, pos)} 内部做的是
- *       {@code Box.raycast(getBoundingBoxes(), from, to, pos)}，而后者对每个盒子
+ *       {@code AABB.raycast(getBoundingBoxes(), from, to, pos)}，而后者对每个盒子
  *       {@code box.offset(pos)} 之后再与世界坐标求交 —— 也就是<b>世界坐标</b>是对的。
  *       实测：满格盒子 + 世界坐标 → 命中；同一组数传"局部坐标" → null。
  *   <li>{@link VoxelShape#getBoundingBoxes()} 返回的盒子是<b>方块局部坐标</b>（0..1），
@@ -41,7 +41,7 @@ public final class RayShape {
 	}
 
 	/** 这个盒子的局部坐标是不是"塞满整格"（0,0,0 → 1,1,1）。 */
-	public static boolean coversFullCell(Box box) {
+	public static boolean coversFullCell(AABB box) {
 		return box != null
 				&& box.minX <= EPS && box.minY <= EPS && box.minZ <= EPS
 				&& box.maxX >= 1.0 - EPS && box.maxY >= 1.0 - EPS && box.maxZ >= 1.0 - EPS;
@@ -55,13 +55,13 @@ public final class RayShape {
 	 * @param from  世界坐标起点
 	 * @param to    世界坐标终点
 	 */
-	public static boolean hits(VoxelShape shape, BlockPos pos, Vec3d from, Vec3d to) {
+	public static boolean hits(VoxelShape shape, BlockPos pos, Vec3 from, Vec3 to) {
 		if (shape == null || shape.isEmpty() || pos == null || from == null || to == null) {
 			return false;
 		}
-		List<Box> boxes = null;
+		List<AABB> boxes = null;
 		try {
-			boxes = shape.getBoundingBoxes();
+			boxes = shape.toAabbs();
 		} catch (Throwable ignored) {
 			// 拿不到盒子列表就走下面的兜底
 		}
@@ -73,8 +73,8 @@ public final class RayShape {
 			// ② 不满格/多盒：逐盒精确求交（楼梯、栅栏、半砖、活板门、玻璃板…）
 			for (int i = 0; i < boxes.size(); i++) {
 				try {
-					Box world = boxes.get(i).offset(pos.getX(), pos.getY(), pos.getZ());
-					if (world.contains(from) || world.raycast(from, to).isPresent()) {
+					AABB world = boxes.get(i).move(pos.getX(), pos.getY(), pos.getZ());
+					if (world.contains(from) || world.clip(from, to).isPresent()) {
 						return true;
 					}
 				} catch (Throwable ignored) {
@@ -85,7 +85,7 @@ public final class RayShape {
 		}
 		// ③ 兜底：盒子列表不可用时，用引擎自己的求交（世界坐标 + pos，实测语义正确）
 		try {
-			return shape.raycast(from, to, pos) != null;
+			return shape.clip(from, to, pos) != null;
 		} catch (Throwable t) {
 			return true; // 连兜底都失败：宁可闷一点，也不要静默地"什么都不挡"
 		}

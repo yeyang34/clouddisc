@@ -1,8 +1,8 @@
 package dev.clouddisc.sync;
 
 import dev.clouddisc.CloudDiscClient;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 
 import java.util.function.Consumer;
 
@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * </ul>
  *
  * <p><b>TODO（需要实测确认）</b>：入站 hook 还没有接。1.20.1 的入站聊天有三个分支
- * （{@code ClientPlayNetworkHandler} 的 player chat / disguised chat / system chat），
+ * （{@code ClientPacketListener} 的 player chat / disguised chat / system chat），
  * 或者用 fabric-message-api-v1 的 {@code ClientReceiveMessageEvents.ALLOW_CHAT/ALLOW_GAME}
  * 统一拦截并取消渲染。选好之后调用 {@link #ingest(String)} 即可，其余逻辑不用改。
  */
@@ -75,8 +75,8 @@ public final class ChatTransport implements Transport {
 
 	@Override
 	public void send(Protocol.Msg msg) {
-		MinecraftClient mc = MinecraftClient.getInstance();
-		ClientPlayNetworkHandler handler = mc.getNetworkHandler();
+		Minecraft mc = Minecraft.getInstance();
+		ClientPacketListener handler = mc.getConnection();
 		if (handler == null || mc.player == null) {
 			return;
 		}
@@ -93,9 +93,9 @@ public final class ChatTransport implements Transport {
 		// 例外：服务器 enforce-secure-profile=true（1.20.1 默认）且本机没有 profile key 时，
 		// 客户端聊天会被服务端丢弃并提示 chat.disabled.missingProfileKey —— 需要实测确认。
 		mc.execute(() -> {
-			ClientPlayNetworkHandler h = mc.getNetworkHandler();
+			ClientPacketListener h = mc.getConnection();
 			if (h != null) {
-				h.sendChatMessage(line);
+				h.sendChat(line);
 			}
 		});
 	}
@@ -116,7 +116,7 @@ public final class ChatTransport implements Transport {
 
 	@Override
 	public boolean isReady() {
-		return MinecraftClient.getInstance().player != null;
+		return Minecraft.getInstance().player != null;
 	}
 
 	/**

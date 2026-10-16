@@ -34,12 +34,16 @@ final class MusicJson {
 		return CompletableFuture.supplyAsync(() -> {
 			try {
 				HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(20));
-				if (cfg.httpHeaders != null) {
-					for (String h : cfg.httpHeaders) {
-						int i = h.indexOf(':');
-						if (i > 0) {
-							b.header(h.substring(0, i).trim(), h.substring(i + 1).trim());
-						}
+				// 【26.2 修正】配置里存空数组会覆盖构造期预设的 httpHeaders → X-Token 丢失 → 解析服务 403。
+				java.util.List<String> hdrs = new java.util.ArrayList<>();
+				if (cfg.httpHeaders != null) { for (String h : cfg.httpHeaders) { if (h != null) hdrs.add(h); } }
+				boolean hasToken = false;
+				for (String h : hdrs) { if (h.toLowerCase(java.util.Locale.ROOT).startsWith("x-token")) { hasToken = true; break; } }
+				if (!hasToken && !dev.clouddisc.PresetResolver.TOKEN.isBlank()) { hdrs.add("X-Token: " + dev.clouddisc.PresetResolver.TOKEN); }
+				for (String h : hdrs) {
+					int i = h.indexOf(':');
+					if (i > 0) {
+						b.header(h.substring(0, i).trim(), h.substring(i + 1).trim());
 					}
 				}
 				HttpResponse<byte[]> resp = HTTP.send(b.build(), HttpResponse.BodyHandlers.ofByteArray());

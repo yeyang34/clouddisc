@@ -2,24 +2,25 @@ package dev.clouddisc.audio;
 
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
-import dev.clouddisc.mixin.SoundSystemAccessor;
-import dev.clouddisc.mixin.SourceAccessor;
-import dev.clouddisc.mixin.SourceManagerAccessor;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.sound.Channel;
-import net.minecraft.client.sound.SoundInstance;
-import net.minecraft.client.sound.SoundSystem;
-import net.minecraft.client.sound.Source;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.RaycastContext;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
+// [26.2] accessor 暂缓（Source/Channel 体系变了）
+// [26.2] accessor 暂缓（Source/Channel 体系变了）
+// [26.2] accessor 暂缓（Source/Channel 体系变了）
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.client.Minecraft;
+import com.mojang.blaze3d.audio.Channel;
+import net.minecraft.client.resources.sounds.SoundInstance;
+import net.minecraft.client.sounds.SoundEngine;
+import net.minecraft.client.sounds.ChannelAccess;
+import com.mojang.blaze3d.audio.Channel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
 import org.lwjgl.openal.AL10;
 
 import java.util.HashMap;
@@ -132,7 +133,8 @@ public final class Acoustics {
 	private static volatile boolean pendingOurs = false;
 	private static volatile int lastSourceId = 0;
 	private static volatile long lastSourceTick = Long.MIN_VALUE / 2;
-	private static volatile SoundSystem soundSystem;
+	private static volatile SoundEngine soundEngine;
+	private static boolean opennessLogged = false;
 
 	// ---------------------------------------------------------------- 每个声源的平滑状态
 	private static final class State {
@@ -220,8 +222,8 @@ public final class Acoustics {
 	}
 
 	/** 把声音系统实例记下来，供"按声音实例精确反查 source id"用。 */
-	public static void noteSoundSystem(SoundSystem ss) {
-		soundSystem = ss;
+	public static void noteSoundSystem(SoundEngine ss) {
+		soundEngine = ss;
 	}
 
 	/** 声源真正 play() 时来领：如果刚才标记的是我们的实例，就认领并捕获 id。 */
@@ -273,32 +275,32 @@ public final class Acoustics {
 	 * @return 0 表示暂时拿不到（声源还没建好 / 已经停掉），调用方应跳过本轮
 	 */
 	private static int resolveSourceId(SoundInstance instance) {
-		SoundSystem ss = soundSystem;
+		SoundEngine ss = soundEngine;
 		if (ss == null || instance == null) {
 			return 0;
 		}
 		try {
-			Map<SoundInstance, Channel.SourceManager> map = ((SoundSystemAccessor) ss).clouddisc$sources();
-			if (map == null) {
+			// 【26.2】精确反查：SoundEngine#instanceToChannel → ChannelHandle → Channel#source
+			java.util.Map<SoundInstance, ChannelAccess.ChannelHandle> map =
+					((dev.clouddisc.mixin.SoundSystemAccessor) (Object) ss).clouddisc$instanceToChannel();
+			ChannelAccess.ChannelHandle handle = map == null ? null : map.get(instance);
+			if (handle == null || handle.isStopped()) {
 				return 0;
 			}
-			Channel.SourceManager sm = map.get(instance);
-			if (sm == null) {
+			com.mojang.blaze3d.audio.Channel ch =
+					((dev.clouddisc.mixin.ChannelHandleAccessor) (Object) handle).clouddisc$channel();
+			if (ch == null) {
 				return 0;
 			}
-			Source src = ((SourceManagerAccessor) sm).clouddisc$source();
-			if (src == null) {
-				return 0;
-			}
-			return ((SourceAccessor) src).clouddisc$pointer();
+			return ((dev.clouddisc.mixin.SourceAccessor) (Object) ch).clouddisc$source();
 		} catch (Throwable t) {
 			return 0;
 		}
 	}
 
 	private static long currentTick() {
-		World w = MinecraftClient.getInstance().world;
-		return w == null ? 0L : w.getTime();
+		Level w = Minecraft.getInstance().level;
+		return w == null ? 0L : w.getGameTime();
 	}
 
 	// ---------------------------------------------------------------- 每 tick 主入口
@@ -330,8 +332,8 @@ public final class Acoustics {
 			if (!EfxEngine.isAvailable()) {
 				EfxEngine.ensureInit(nowTick);
 			}
-			MinecraftClient mc = MinecraftClient.getInstance();
-			World world = mc.world;
+			Minecraft mc = Minecraft.getInstance();
+			Level world = mc.level;
 			Entity self = mc.player;
 			if (world == null || self == null) {
 				return;
@@ -364,7 +366,7 @@ public final class Acoustics {
 			smooth(st, nowTick);
 
 			// ③ 应用层
-			Vec3d center = centerOf(jukebox);
+			Vec3 center = centerOf(jukebox);
 			if (directionEnabled()) {
 				applyPosition(sourceId, st, center.x, center.y, center.z);
 			}
@@ -416,9 +418,9 @@ public final class Acoustics {
 	 *       开阔度修正 {@code max(sqrt(shared)*0.2, cutoff)} 加了门槛：遮挡 ≥ 0.6 时不允许抬截止。</li>
 	 * </ul>
 	 */
-	private static void evaluate(World world, Entity self, BlockPos jukebox, State st, long nowTick) {
-		Vec3d ear = earOf(self);
-		Vec3d center = centerOf(jukebox);
+	private static void evaluate(Level world, Entity self, BlockPos jukebox, State st, long nowTick) {
+		Vec3 ear = earOf(self);
+		Vec3 center = centerOf(jukebox);
 		double dist = ear.distanceTo(center);
 
 		// 材质探针：physicsSoundDebug=true 时，本轮把自己真正命中的方块收集起来（去重、最多 6 条）
@@ -463,22 +465,22 @@ public final class Acoustics {
 						// 其中带 y=−1 的射线会钻进地面/台阶，被算成"被挡" → 被挡占比虚高到 8/8
 						// → 一根八竿子打不着的柱子就能让遮挡吃满 1.0（实测日志：通透通路=0/8、GAINHF=0.017）。
 						// 我们要采样的是"声束的横截面"，所以偏移必须在垂直平面内。
-						Vec3d off = perpendicularOffset(center, ear, sx, sy, sz);
+						Vec3 off = perpendicularOffset(center, ear, sx, sy, sz);
 						// 【0.12.64】关键修复：偏移射线的起点可能落在【地面/地板】等实心方块内部
 						//（垂直平面内的偏移有朝下/朝上的方向）→ occlusionAt 从方块内部起步，
 						// 第一格立刻 +1.0 → 这几条永远算"被挡" → 被挡占比虚高到 8/8
 						// → 一根柱子、甚至只挡上一块方块就让遮挡吃满 1.0（实测"拆了柱子还是全闷"）。
 						// 物理上：紧贴声源的底座/地面不在"你我之间"，不该算遮挡 → 起点沿射线前进 1.5 格。
-						Vec3d offFrom = center.add(off);
-						Vec3d offTo = ear.add(off);
-						Vec3d offDir = offTo.subtract(offFrom);
+						Vec3 offFrom = center.add(off);
+						Vec3 offTo = ear.add(off);
+						Vec3 offDir = offTo.subtract(offFrom);
 						double offLen = offDir.length();
 						// 【0.12.75】只有起点【确实落在实心方块里】才沿射线前移；否则保持原位。
 						// 原来无条件前移 1.5 格 —— 站在唱片机正上方时垂直偏移射线的起点被抬到屋顶之上，
 						// 屋顶完全不被计入 → 被挡占比 0 → occ = 0（实测："正上方房顶是透的，远一点就挡"）。
-						Vec3d offStart = offFrom;
-						if (offLen > 1.6 && !freeAt(world, BlockPos.ofFloored(offFrom.x, offFrom.y, offFrom.z))) {
-							offStart = offFrom.add(offDir.multiply(1.5 / offLen));
+						Vec3 offStart = offFrom;
+						if (offLen > 1.6 && !freeAt(world, BlockPos.containing(offFrom.x, offFrom.y, offFrom.z))) {
+							offStart = offFrom.add(offDir.scale(1.5 / offLen));
 						}
 						double o = occlusionAt(world, offStart, offTo, jukebox);
 						if (o < bestOffset) {
@@ -510,6 +512,17 @@ public final class Acoustics {
 
 			double fracBlocked = 1.0 - (openPaths / 8.0);
 			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
+			// ===== 【26.2 · 方案乙】紧贴实心隔断的另一侧，不做"最通畅路"清零 =====
+			// 场景：唱片机上方封严，听者就站在屋顶上（声源→听者连线近似垂直）。
+			//   实测 [M7]：主射线遮挡=2.000（屋顶确实被射线打到）✗ 但 通透通路=8/8 ✗
+			//   → 8 条水平偏移射线从屋顶侧边飞出去 → fracBlocked=0 → occ=0 → 不闷 ✗
+			// 物理上"声音确实会绕屋顶边缘上来"，但听感上应是"隔着屋顶很闷"。
+			// 判据：主射线被实心挡（≥1.0）＋ 8 条全通 ＋ 双方很近（≤6 格，绕行不占主导）
+			//   → 认为是"紧贴隔断的另一侧"，采用主射线遮挡（打 0.85 折，保留侧向绕射的贡献）。
+			// 注意：这是【26.2 移植期针对该场景的最小改动】，0.12.x/0.13.x 原算法不含此分支。
+			if (openPaths >= 8 && occMain >= 1.0 && dist <= 6.0) {
+				occ = occMain * 0.85;
+			}
 			// 【0.12.65】"声路"覆盖：若存在一条可走过去的路线（半径内 BFS 可达），
 			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
 			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
@@ -603,7 +616,7 @@ public final class Acoustics {
 		// ---- M6 水下：直通再乘 0.1，混响发送也一起变闷 ----
 		boolean underwater = false;
 		try {
-			underwater = self.isSubmergedInWater();
+			underwater = self.isUnderWater();
 		} catch (Throwable ignored) {
 			// 取不到就当不在水下
 		}
@@ -785,7 +798,7 @@ public final class Acoustics {
 				new EfxEngine.Reverb(), new EfxEngine.Reverb()};
 	}
 
-	private static ReverbResult traceReverb(World world, Vec3d center, Vec3d ear, BlockPos jukebox, double occ,
+	private static ReverbResult traceReverb(Level world, Vec3 center, Vec3 ear, BlockPos jukebox, double occ,
 			float k) {
 		ReverbResult out = new ReverbResult();
 		int numRays = rays();
@@ -806,12 +819,12 @@ public final class Acoustics {
 			double yy = 1.0 - 2.0 * (i + 0.5) / numRays;
 			double rr = Math.sqrt(Math.max(0.0, 1.0 - yy * yy));
 			double th = theta0 + GOLDEN_ANGLE * i;
-			Vec3d dir = new Vec3d(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
-			Vec3d origin = center;
+			Vec3 dir = new Vec3(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
+			Vec3 origin = center;
 			double totalDist = 0.0;
 
 			for (int b = 0; b < REVERB_BOUNCES; b++) {
-				Vec3d end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
 
 				// 【0.12.56】接收球判定（房间声学标准做法，用户提出的思路）：
@@ -820,12 +833,12 @@ public final class Acoustics {
 				// 物理依据：声音是压力场，决定听到与否的是"有无传播路径经过听者附近"，
 				// 而不是"能否看见音源"。反射只是延长路径的一种方式，与直达段同等对待。
 				{
-					Vec3d segEnd = hit == null ? end : hit.point();
-					Vec3d near = closestPointOnSegment(origin, segEnd, ear);
-					if (near != null && near.squaredDistanceTo(ear) <= EAR_REACH * EAR_REACH) {
+					Vec3 segEnd = hit == null ? end : hit.point();
+					Vec3 near = closestPointOnSegment(origin, segEnd, ear);
+					if (near != null && near.distanceToSqr(ear) <= EAR_REACH * EAR_REACH) {
 						// 听者的"捕获射线"也要通（最近点到耳朵之间没有实体），
 						// 否则贴着墙站在墙外、射线在墙内掠过会被误判为听到了。
-						if (RayWalk.cast(world, near.add(ear.subtract(near).normalize().multiply(0.02)), ear, 24) == null) {
+						if (RayWalk.cast(world, near.add(ear.subtract(near).normalize().scale(0.02)), ear, 24) == null) {
 							out.earReach++;
 						}
 					}
@@ -861,11 +874,11 @@ public final class Acoustics {
 				// 只在直通被挡时才算 —— 直通通透时 openness 本来就是 1，没必要花这个钱。
 				if (occ > 0.0 && clearLineTests < MAX_CLEAR_LINE_TESTS) {
 					clearLineTests++;
-					Vec3d hp = hit.point().add(hit.normal().multiply(0.002));
+					Vec3 hp = hit.point().add(hit.normal().scale(0.002));
 					if (RayWalk.cast(world, hp, ear, MAX_CLEAR_LINE_STEPS) == null) {
 						out.earReach++;
 						sharedAirspaces++;
-						Vec3d d = ear.subtract(hp);
+						Vec3 d = ear.subtract(hp);
 						double len = d.length();
 						if (len > 0.5) {
 							double w = 1.0 / (len * len);
@@ -878,7 +891,7 @@ public final class Acoustics {
 				}
 
 				dir = reflect(dir, hit.normal());
-				origin = hit.point().add(hit.normal().multiply(0.002));
+				origin = hit.point().add(hit.normal().scale(0.002));
 			}
 		}
 
@@ -924,7 +937,7 @@ public final class Acoustics {
 		return out;
 	}
 
-	private static BlockState safeState(World world, BlockPos p) {
+	private static BlockState safeState(Level world, BlockPos p) {
 		try {
 			return world.getBlockState(p);
 		} catch (Throwable t) {
@@ -933,9 +946,9 @@ public final class Acoustics {
 	}
 
 	/** 镜面反射：{@code dir - 2 (dir·n) n}。 */
-	private static Vec3d reflect(Vec3d dir, Vec3d normal) {
-		double dot = dir.dotProduct(normal) * 2.0;
-		return new Vec3d(dir.x - dot * normal.x, dir.y - dot * normal.y, dir.z - dot * normal.z);
+	private static Vec3 reflect(Vec3 dir, Vec3 normal) {
+		double dot = dir.dot(normal) * 2.0;
+		return new Vec3(dir.x - dot * normal.x, dir.y - dot * normal.y, dir.z - dot * normal.z);
 	}
 
 	private static int rays() {
@@ -998,7 +1011,7 @@ public final class Acoustics {
 	 * 采集一个"真正参与了遮挡累加"的方块（空气/无碰撞体积的东西不会走到这里）。
 	 * <p>{@code physicsSoundDebug=false} 时这是个空操作（一个分支判断，开销可忽略）。
 	 */
-	private static void noteProbe(BlockState bs, World world, BlockPos p) {
+	private static void noteProbe(BlockState bs, Level world, BlockPos p) {
 		if (!probing || PROBE.size() >= PROBE_COLLECT_MAX) {
 			return;
 		}
@@ -1046,7 +1059,7 @@ public final class Acoustics {
 	 * 开一次调试就整表打一遍（<b>这是"材质表到底生效没有"最快的一条证据</b>）：
 	 * 不依赖任何射线命中，开局就在日志里看到每个样本方块命中了哪一组。
 	 */
-	private static void dumpMaterialTableOnce(World world) {
+	private static void dumpMaterialTableOnce(Level world) {
 		if (tableDumped || !debugEnabled()) {
 			return;
 		}
@@ -1056,7 +1069,9 @@ public final class Acoustics {
 	}
 
 	/** 沿 from → to 逐格累加材质遮挡值。 */
-	private static double occlusionAt(World world, Vec3d from, Vec3d to, BlockPos skip) {
+	private static boolean occlusionLogged = false;
+
+	private static double occlusionAt(Level world, Vec3 from, Vec3 to, BlockPos skip) {
 		final double[] acc = {0.0};
 		RayWalk.walk(from.x, from.y, from.z, to.x, to.y, to.z, MAX_OCC_STEPS, (x, y, z, t, nx, ny, nz) -> {
 			BlockPos p = new BlockPos(x, y, z);
@@ -1115,15 +1130,15 @@ public final class Acoustics {
 	 * 其余情况用 {@link VoxelShape#raycast} 真正求交（它需要**世界坐标**，内部会 box.offset(pos)）；
 	 * 若起点/终点已经落在实体内部（raycast 对这种情形可能返回 null），用包围盒补判。
 	 */
-	private static boolean hitsShape(VoxelShape shape, Vec3d from, Vec3d to, BlockPos pos) {
+	private static boolean hitsShape(VoxelShape shape, Vec3 from, Vec3 to, BlockPos pos) {
 		try {
-			Box bb = shape.getBoundingBox();
+			AABB bb = shape.bounds();
 			boolean fullCube = bb.minX <= 1.0e-3 && bb.minY <= 1.0e-3 && bb.minZ <= 1.0e-3
 					&& bb.maxX >= 1.0 - 1.0e-3 && bb.maxY >= 1.0 - 1.0e-3 && bb.maxZ >= 1.0 - 1.0e-3;
 			if (fullCube) {
 				return true;
 			}
-			if (shape.raycast(from, to, pos) != null) {
+			if (shape.clip(from, to, pos) != null) {
 				return true;
 			}
 			return bb.contains(from) || bb.contains(to);
@@ -1145,7 +1160,7 @@ public final class Acoustics {
 	 *
 	 * @return 0..1，越大表示越"该闷"
 	 */
-	private static float openness(World world, Vec3d p, Entity self) {
+	private static float openness(Level world, Vec3 p, Entity self) {
 		int open = 0;
 		int total = 0;
 		final double[][] dirs = {
@@ -1157,13 +1172,23 @@ public final class Acoustics {
 			try {
 				// 【0.12.34】起点必须离开方块本身 0.6 格：否则向下的射线会撞到脚下的底座、
 				// 水平射线会撞到唱片机自己或紧贴的方块，于是"露天也会被判成封闭"（实测真凶）。
-				Vec3d from = p.add(d[0] * 0.6, d[1] * 0.6, d[2] * 0.6);
-				Vec3d to = p.add(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0);
-				BlockHitResult hit = world.raycast(new RaycastContext(from, to, RaycastContext.ShapeType.COLLIDER,
-						RaycastContext.FluidHandling.NONE, self));
+				Vec3 from = p.add(new Vec3(d[0] * 0.6, d[1] * 0.6, d[2] * 0.6));
+				Vec3 to = p.add(new Vec3(d[0] * 14.0, d[1] * 14.0, d[2] * 14.0));
+				BlockHitResult hit = world.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
+						ClipContext.Fluid.NONE, self));
+				// 【26.2 诊断】第一条射线打印原始信息（一次性，方便定位"射线为什么打不到"）
+				if (total == 1 && !opennessLogged) {
+					opennessLogged = true;
+					CloudDiscClient.LOGGER.info("[CloudDisc] 诊断/开阔度: p=({},{},{}) from=({},{},{}) to=({},{},{}) clip={} type={} pos={}",
+							fmt1(p.x), fmt1(p.y), fmt1(p.z),
+							fmt1(from.x), fmt1(from.y), fmt1(from.z),
+							fmt1(to.x), fmt1(to.y), fmt1(to.z),
+							(hit == null ? "null" : "非空"), (hit == null ? "null" : String.valueOf(hit.getType())),
+							(hit == null ? "null" : String.valueOf(hit.getBlockPos())));
+				}
 				if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
 					open++;
-				} else if (false && hit.getPos().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
+				} else if (false && hit.getLocation().distanceTo(p) < 0.9) { // 【0.12.39】禁用：贴墙时它把墙忽略了，导致遮挡被闸门清零
 					// 【0.12.35】只忽略 0.9 格以内的命中：那是脚下的地面 / 紧贴声源的方块（"就地放置"）。
 					// 上一版写成 2.0，结果小房间的墙（常在 1.5~2 格处）也被当成"就地放置"，
 					// 于是小屋里反而完全不闷 —— 实测反馈后收紧到 0.9。
@@ -1177,9 +1202,9 @@ public final class Acoustics {
 	}
 
 	/** 双方空间封闭度 → 遮挡闸门（见调用处注释）。 */
-	private static float spaceGate(World world, Vec3d ear, Vec3d center) {
+	private static float spaceGate(Level world, Vec3 ear, Vec3 center) {
 		try {
-			Entity self = MinecraftClient.getInstance().player;
+			Entity self = Minecraft.getInstance().player;
 			float openSrc = openness(world, center, self);
 			float openEar = openness(world, ear, self);
 			// 阈值放宽到 0.45：站在树下、屋檐下、半开放走廊里都算"开阔"（不该莫名变闷）
@@ -1201,16 +1226,16 @@ public final class Acoustics {
 	}
 
 	/** 线段 ab 上离点 p 最近的点（clamp 投影参数 t∈[0,1]）。 */
-	private static Vec3d closestPointOnSegment(Vec3d a, Vec3d b, Vec3d p) {
+	private static Vec3 closestPointOnSegment(Vec3 a, Vec3 b, Vec3 p) {
 		try {
-			Vec3d ab = b.subtract(a);
-			double len2 = ab.lengthSquared();
+			Vec3 ab = b.subtract(a);
+			double len2 = ab.lengthSqr();
 			if (len2 < 1.0e-9) {
 				return a;
 			}
-			double t = p.subtract(a).dotProduct(ab) / len2;
+			double t = p.subtract(a).dot(ab) / len2;
 			t = Math.max(0.0, Math.min(1.0, t));
-			return a.add(ab.multiply(t));
+			return a.add(ab.scale(t));
 		} catch (Throwable t) {
 			return null;
 		}
@@ -1227,31 +1252,31 @@ public final class Acoustics {
 	 *
 	 * @return 命中的路径条数（≥1 即认为存在通路）
 	 */
-	private static int listenerPathsTo(World world, Vec3d ear, Vec3d center, BlockPos jukebox) {
+	private static int listenerPathsTo(Level world, Vec3 ear, Vec3 center, BlockPos jukebox) {
 		int hits = 0;
 		int rays = Math.max(16, Math.min(64, rays()));
 		for (int i = 0; i < rays; i++) {
 			double yy = 1.0 - 2.0 * (i + 0.5) / rays;
 			double rr = Math.sqrt(Math.max(0.0, 1.0 - yy * yy));
 			double th = GOLDEN_ANGLE * i;
-			Vec3d dir = new Vec3d(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
-			Vec3d origin = ear;
+			Vec3 dir = new Vec3(rr * Math.cos(th), yy, rr * Math.sin(th)).normalize();
+			Vec3 origin = ear;
 			for (int b = 0; b < 3; b++) {
-				Vec3d end = origin.add(dir.multiply(REVERB_MAX_DISTANCE));
+				Vec3 end = origin.add(dir.scale(REVERB_MAX_DISTANCE));
 				RayWalk.Hit hit;
 				try {
 					hit = RayWalk.cast(world, origin, end, MAX_REVERB_STEPS);
 				} catch (Throwable t2) {
 					break;
 				}
-				Vec3d segEnd = hit == null ? end : hit.point();
+				Vec3 segEnd = hit == null ? end : hit.point();
 				// 这一段是否"到达唱片机"：直接命中唱片机方块，或从它 1.5 格内掠过且直线通畅
 				if (hit != null && hit.pos.equals(jukebox)) {
 					hits++;
 					break;
 				}
-				Vec3d near = closestPointOnSegment(origin, segEnd, center);
-				if (near != null && near.squaredDistanceTo(center) <= 2.25) {
+				Vec3 near = closestPointOnSegment(origin, segEnd, center);
+				if (near != null && near.distanceToSqr(center) <= 2.25) {
 					if (RayWalk.cast(world, near, center, 24) == null) {
 						hits++;
 						break;
@@ -1261,9 +1286,9 @@ public final class Acoustics {
 					break;
 				}
 				// 镜面反射（dir - 2(dir·n)n），与追踪器同一公式
-				double d = dir.dotProduct(hit.normal()) * 2.0;
-				dir = dir.subtract(hit.normal().multiply(d)).normalize();
-				origin = hit.point().add(hit.normal().multiply(0.002));
+				double d = dir.dot(hit.normal()) * 2.0;
+				dir = dir.subtract(hit.normal().scale(d)).normalize();
+				origin = hit.point().add(hit.normal().scale(0.002));
 			}
 			if (hits >= 3) {
 				break; // 够用了，省开销
@@ -1281,7 +1306,7 @@ public final class Acoustics {
 	 *
 	 * @return 可行的绕行折线条数（≥1 即存在绕射通路）
 	 */
-	private static int edgePathsTo(World world, Vec3d ear, Vec3d center, BlockPos jukebox) {
+	private static int edgePathsTo(Level world, Vec3 ear, Vec3 center, BlockPos jukebox) {
 		int hits = 0;
 		try {
 			RayWalk.Hit h = RayWalk.cast(world, ear, center, MAX_REVERB_STEPS);
@@ -1301,7 +1326,7 @@ public final class Acoustics {
 						if (dx * dx + dy * dy + dz * dz > 6) {
 							continue; // 只取半径 ~2.4 格内的点，控制开销
 						}
-						Vec3d p = new Vec3d(bp.getX() + 0.5 + dx, bp.getY() + 0.5 + dy, bp.getZ() + 0.5 + dz);
+						Vec3 p = new Vec3(bp.getX() + 0.5 + dx, bp.getY() + 0.5 + dy, bp.getZ() + 0.5 + dz);
 						if (RayWalk.cast(world, ear, p, MAX_REVERB_STEPS) == null
 								&& RayWalk.cast(world, p, center, MAX_REVERB_STEPS) == null) {
 							hits++;
@@ -1319,25 +1344,25 @@ public final class Acoustics {
 	}
 
 	/** 【0.12.62】把 (sx,sy,sz)∈{±1}³ 映射成"垂直于 听者→声源 轴"的平面内 8 个方向之一（半径 1 格）。 */
-	private static Vec3d perpendicularOffset(Vec3d center, Vec3d ear, int sx, int sy, int sz) {
+	private static Vec3 perpendicularOffset(Vec3 center, Vec3 ear, int sx, int sy, int sz) {
 		try {
-			Vec3d axis = ear.subtract(center);
-			if (axis.lengthSquared() < 1.0e-9) {
-				return new Vec3d(sx, sy, sz);
+			Vec3 axis = ear.subtract(center);
+			if (axis.lengthSqr() < 1.0e-9) {
+				return new Vec3(sx, sy, sz);
 			}
 			axis = axis.normalize();
-			Vec3d ref = Math.abs(axis.y) < 0.9 ? new Vec3d(0.0, 1.0, 0.0) : new Vec3d(1.0, 0.0, 0.0);
-			Vec3d u = axis.crossProduct(ref);
-			if (u.lengthSquared() < 1.0e-9) {
-				return new Vec3d(sx, sy, sz);
+			Vec3 ref = Math.abs(axis.y) < 0.9 ? new Vec3(0.0, 1.0, 0.0) : new Vec3(1.0, 0.0, 0.0);
+			Vec3 u = axis.cross(ref);
+			if (u.lengthSqr() < 1.0e-9) {
+				return new Vec3(sx, sy, sz);
 			}
 			u = u.normalize();
-			Vec3d v = axis.crossProduct(u).normalize();
+			Vec3 v = axis.cross(u).normalize();
 			int idx = ((sx > 0 ? 1 : 0) << 2) | ((sy > 0 ? 1 : 0) << 1) | (sz > 0 ? 1 : 0);
 			double ang = idx * (Math.PI / 4.0);
-			return u.multiply(Math.cos(ang)).add(v.multiply(Math.sin(ang)));
+			return u.scale(Math.cos(ang)).add(v.scale(Math.sin(ang)));
 		} catch (Throwable t) {
-			return new Vec3d(sx, sy, sz);
+			return new Vec3(sx, sy, sz);
 		}
 	}
 
@@ -1349,9 +1374,9 @@ public final class Acoustics {
 	 * 都是问"有没有一条【能走过去的路线】"，而不是"直线上有没有方块"。
 	 * 这样才能做到：一根柱子（绕 2 格）几乎不影响 ✓；关着的门（无路）明显闷 ✓。
 	 */
-	private static int pathLengthTo(World world, BlockPos from, Vec3d ear) {
+	private static int pathLengthTo(Level world, BlockPos from, Vec3 ear) {
 		try {
-			BlockPos to = BlockPos.ofFloored(ear.x, ear.y, ear.z);
+			BlockPos to = BlockPos.containing(ear.x, ear.y, ear.z);
 			int ddx = from.getX() - to.getX();
 			int ddy = from.getY() - to.getY();
 			int ddz = from.getZ() - to.getZ();
@@ -1376,7 +1401,7 @@ public final class Acoustics {
 					continue;
 				}
 				for (int i = 0; i < 6; i++) {
-					BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+					BlockPos n = p.offset(DX[i], DY[i], DZ[i]);
 					if (dist.containsKey(n)) {
 						continue;
 					}
@@ -1407,7 +1432,7 @@ public final class Acoustics {
 	}
 
 	/** 该格是否为"空气/可穿过"（无碰撞体积）。 */
-	private static boolean freeAt(World world, BlockPos p) {
+	private static boolean freeAt(Level world, BlockPos p) {
 		try {
 			return world.getBlockState(p).getCollisionShape(world, p).isEmpty();
 		} catch (Throwable t) {
@@ -1416,7 +1441,7 @@ public final class Acoustics {
 	}
 
 	/** 该格是否为实心（有碰撞体积）。 */
-	private static boolean solidAt(World world, BlockPos p) {
+	private static boolean solidAt(Level world, BlockPos p) {
 		return !freeAt(world, p);
 	}
 
@@ -1426,16 +1451,16 @@ public final class Acoustics {
 	 * 这样"从墙头上方/屋顶上方的空气绕过去"就不成立（上一版正因为把空气当可通行，
 	 * 门开与门关都能绕，导致完全不闷）。副作用符合现实：1 格矮墙能跨（轻微衰减）、2 格以上跨不过（明显闷）。
 	 */
-	private static boolean walkableCell(World world, BlockPos n) {
+	private static boolean walkableCell(Level world, BlockPos n) {
 		try {
-			if (!freeAt(world, n) || !freeAt(world, n.up())) {
+			if (!freeAt(world, n) || !freeAt(world, n.above())) {
 				return false;
 			}
-			BlockPos below = n.down();
+			BlockPos below = n.below();
 			if (solidAt(world, below)) {
 				return true;
 			}
-			return solidAt(world, below.down());
+			return solidAt(world, below.below());
 		} catch (Throwable t) {
 			return false;
 		}
@@ -1454,9 +1479,9 @@ public final class Acoustics {
 	 *
 	 * @return 房间内路径格数；-1 表示两者空气不相通（只能穿墙）
 	 */
-	private static int roomPathLength(World world, BlockPos from, Vec3d ear) {
+	private static int roomPathLength(Level world, BlockPos from, Vec3 ear) {
 		try {
-			BlockPos to = BlockPos.ofFloored(ear.x, ear.y, ear.z);
+			BlockPos to = BlockPos.containing(ear.x, ear.y, ear.z);
 			int ddx = from.getX() - to.getX();
 			int ddy = from.getY() - to.getY();
 			int ddz = from.getZ() - to.getZ();
@@ -1482,7 +1507,7 @@ public final class Acoustics {
 	}
 
 	/** 在空气里做有界 BFS，返回"格 → 距起点步数"。 */
-	private static java.util.HashMap<BlockPos, Integer> floodAir(World world, BlockPos start, int cap) {
+	private static java.util.HashMap<BlockPos, Integer> floodAir(Level world, BlockPos start, int cap) {
 		java.util.HashMap<BlockPos, Integer> dist = new java.util.HashMap<>();
 		java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
 		dist.put(start, 0);
@@ -1497,7 +1522,7 @@ public final class Acoustics {
 				continue;
 			}
 			for (int i = 0; i < 6; i++) {
-				BlockPos n = p.add(DX[i], DY[i], DZ[i]);
+				BlockPos n = p.offset(DX[i], DY[i], DZ[i]);
 				if (dist.containsKey(n)) {
 					continue;
 				}
@@ -1516,12 +1541,12 @@ public final class Acoustics {
 		return cfg != null && cfg.physicsSoundDirection;
 	}
 
-	private static Vec3d earOf(Entity self) {
-		return new Vec3d(self.getX(), self.getEyeY(), self.getZ());
+	private static Vec3 earOf(Entity self) {
+		return new Vec3(self.getX(), self.getEyeY(), self.getZ());
 	}
 
-	private static Vec3d centerOf(BlockPos jukebox) {
-		return new Vec3d(jukebox.getX() + 0.5, jukebox.getY() + 0.6, jukebox.getZ() + 0.5);
+	private static Vec3 centerOf(BlockPos jukebox) {
+		return new Vec3(jukebox.getX() + 0.5, jukebox.getY() + 0.6, jukebox.getZ() + 0.5);
 	}
 
 	// ---------------------------------------------------------------- 参数层（按时间平滑）
@@ -1579,7 +1604,7 @@ public final class Acoustics {
 
 	// ---------------------------------------------------------------- 诊断
 
-	private static void logDiagnostics(State st, int sourceId, long nowTick, World world, Entity self, BlockPos jukebox) {
+	private static void logDiagnostics(State st, int sourceId, long nowTick, Level world, Entity self, BlockPos jukebox) {
 		CloudDiscConfig cfg = CloudDiscClient.config();
 		boolean debug = cfg != null && cfg.physicsSoundDebug;
 		// 平时每 10 秒一行；调试模式下每 1 秒一行（方便边拆墙边看数值变化）
@@ -1588,7 +1613,7 @@ public final class Acoustics {
 			return;
 		}
 		st.lastLogTick = nowTick;
-		Vec3d ear = earOf(self);
+		Vec3 ear = earOf(self);
 		double dist = ear.distanceTo(centerOf(jukebox));
 		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: source={} EFX={} 遮挡累积={} 主射线遮挡={} 通透通路={}/8 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
 						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格",
@@ -1604,7 +1629,7 @@ public final class Acoustics {
 		if (!st.posSeeded) {
 			return 0.0;
 		}
-		Vec3d c = centerOf(jukebox);
+		Vec3 c = centerOf(jukebox);
 		return Math.sqrt((st.posX - c.x) * (st.posX - c.x) + (st.posY - c.y) * (st.posY - c.y) + (st.posZ - c.z) * (st.posZ - c.z));
 	}
 

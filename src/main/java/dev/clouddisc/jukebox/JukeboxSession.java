@@ -2,8 +2,8 @@ package dev.clouddisc.jukebox;
 
 import dev.clouddisc.audio.AudioPipeline;
 import dev.clouddisc.audio.PcmAudioStream;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 import java.util.UUID;
 
@@ -82,27 +82,41 @@ public final class JukeboxSession {
 	}
 
 	public BlockPos pos() {
-		return BlockPos.fromLong(packedPos);
+		return BlockPos.of(packedPos);
 	}
 
 	/** 本地播放资源的整体销毁；MC 调 AudioStream.close() 时也会走到这里。 */
 	public void dispose() {
 		state = State.DEAD;
+		// ① 停声音实例：必须在客户端线程 ✓ 这一句本身很轻 ✓
 		if (instance != null) {
-			net.minecraft.client.MinecraftClient.getInstance().getSoundManager().stop(instance);
+			net.minecraft.client.Minecraft.getInstance().getSoundManager().stop(instance);
 		}
 		if (streamId != null) {
 			StreamRegistry.remove(streamId);
 		}
-		if (stream != null) {
-			stream.close();
-		}
-		if (pipeline != null) {
-			pipeline.close();
-		}
+		// ② 关流 + 关管线：内部会做 I/O（关解码流 / 关音源 ✓）
+		//    之前它们在【渲染线程】上做 ✗ ⇒ 拔碟时整帧卡一下 ✓（实测如此 ✓）
+		//    现在丢到后台线程 ✓ 渲染线程只做"交出引用"这种瞬间完成的活 ✓
+		final net.minecraft.client.sounds.AudioStream cleanupStream = stream;
+		final AudioPipeline cleanupPipeline = pipeline;
 		instance = null;
 		stream = null;
 		pipeline = null;
 		streamId = null;
+		if (cleanupStream != null || cleanupPipeline != null) {
+			Thread t = new Thread(() -> {
+				try {
+					if (cleanupStream != null) {
+						cleanupStream.close();
+					} else {
+						cleanupPipeline.close();
+					}
+				} catch (Throwable ignored) {
+				}
+			}, "CloudDisc-Cleanup");
+			t.setDaemon(true);
+			t.start();
+		}
 	}
 }

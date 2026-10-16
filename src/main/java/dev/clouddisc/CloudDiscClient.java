@@ -5,17 +5,17 @@ import dev.clouddisc.sync.SyncService;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.KeyMapping;
+import com.mojang.blaze3d.platform.InputConstants;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +40,39 @@ public final class CloudDiscClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		// ===== 【混入自检】不需要玩游戏就能确认 mixin 是否真的应用 ✓ =====
+		// mixin 会把方法【合并进目标类】✓ 反射查一下就知道 ✓（以前这里写错过锚点，一直没生效 ✗）
+		try {
+			Class<?> jsp = Class.forName("net.minecraft.world.item.JukeboxSongPlayer");
+			boolean jb = false;
+			for (java.lang.reflect.Method m : jsp.getDeclaredMethods()) {
+				if (m.getName().contains("clouddisc$holdStop") || m.getName().contains("clouddisc$keepPlaying")) {
+					jb = true;
+				}
+			}
+			LOGGER.info("[CloudDisc] 混入自检: JetboxSongPlayer 注入={} ✓（时长解锁）", jb);
+			Class<?> ler = Class.forName("net.minecraft.client.renderer.entity.LivingEntityRenderer");
+			boolean jelly = false;
+			for (java.lang.reflect.Method m : ler.getDeclaredMethods()) {
+				if (m.getName().contains("clouddisc$jelly")) {
+					jelly = true;
+				}
+			}
+			LOGGER.info("[CloudDisc] 混入自检: 生物渲染注入={} ✓（彩蛋果冻）", jelly);
+			LOGGER.info("[CloudDisc] 彩蛋说明: 播放 @3438848556 时，唱片机 10 格内的生物会变成果冻；停止播放立即消失 ✓");
+		} catch (Throwable t) {
+			LOGGER.warn("[CloudDisc] 混入自检异常: {}", t.toString());
+		}
+				// 【26.2】注册中继通道的载荷类型。
+		// 注意方向（踩过一次坑 ✓）：
+		//   clientboundPlay  = 客户端【收】服务端的包（我们的应答 HELLO 走这个 ✓）
+		//   serverboundPlay  = 客户端【发】给服务端的包（我们的会话数据走这个 ✓）
+		// 客户端两个方向都要注册 ✓ 否则 registerGlobalReceiver 会报
+		// "no payload type has been registered … for CLIENTBOUND PLAY" ✗
+		net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.clientboundPlay()
+				.register(dev.clouddisc.net.CloudDiscRelayPayload.TYPE, dev.clouddisc.net.CloudDiscRelayPayload.CODEC);
+		net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.serverboundPlay()
+				.register(dev.clouddisc.net.CloudDiscRelayPayload.TYPE, dev.clouddisc.net.CloudDiscRelayPayload.CODEC);
 		config = CloudDiscConfig.get();
 		sync = new SyncService(config);
 		sync.init();
@@ -64,16 +97,18 @@ public final class CloudDiscClient implements ClientModInitializer {
 		//   ① 快捷键（默认 K，可在"选项 → 控制"里改）
 		//   ② 客户端命令 /clouddisc —— 纯客户端命令，服务器没装任何东西也能用
 		//   ③ ModMenu 的模组列表按钮（装了 ModMenu 才会出现，见 ModMenuIntegration）
-		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.clouddisc.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_K, "category.clouddisc"));
+		configKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.clouddisc.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, net.minecraft.client.KeyMapping.Category.MISC));
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
-			while (configKey.wasPressed()) {
+			while (configKey.consumeClick()) {
+			LOGGER.info("[CloudDisc] 配置按键被按下 → 打开界面");
 				openConfigScreen(null);
 			}
 		});
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-				dispatcher.register(ClientCommandManager.literal("clouddisc").executes(context -> {
-					MinecraftClient client = context.getSource().getClient();
+				dispatcher.register(ClientCommands.literal("clouddisc").executes(context -> {
+					Minecraft client = context.getSource().getClient();
+					LOGGER.info("[CloudDisc] /clouddisc 命令触发 → 打开界面");
 					client.execute(() -> openConfigScreen(null));
 					return 1;
 				})));
@@ -102,11 +137,16 @@ public final class CloudDiscClient implements ClientModInitializer {
 		return config;
 	}
 
-	private static KeyBinding configKey;
+	private static KeyMapping configKey;
+	private static long heartbeatTicks = 0L;
 
 	/** 打开配置界面。{@code parent} 为 null 时返回上一级由屏幕自己处理（回到游戏）。 */
 	public static void openConfigScreen(Screen parent) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		client.setScreen(new CloudDiscConfigScreen(parent));
+		Minecraft client = Minecraft.getInstance();
+		try {
+			client.setScreenAndShow(new CloudDiscConfigScreen(parent));
+		} catch (Throwable t) {
+			LOGGER.error("[CloudDisc] 打开配置界面失败（诊断）", t);
+		}
 	}
 }

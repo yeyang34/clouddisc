@@ -2,30 +2,35 @@ package dev.clouddisc.sync;
 
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.net.CloudDiscNet;
+import dev.clouddisc.net.CloudDiscRelayPayload;
+import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.PacketByteBuf;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.FriendlyByteBuf;
 
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
 /**
- * 服务端中继通道（客户端侧）。
+ * 服务端中继通道（客户端侧，26.2 版）。
  *
- * <p>对应服务端那个可选组件 {@code CloudDiscServer}。特点：
+ * <p>1.20.1 → 26.2 的唯一变化是【网络包形态】：
  * <ul>
- *   <li><b>有则用、无则自动降级</b>：进服时发一个"报到"，只有服务器装了中继组件才会回一份，
- *       收到应答才算可用。所以装在没装组件的服务器上完全无副作用。</li>
- *   <li><b>不走聊天长度限制</b>，因此 {@link #carriesUri()} 为 true —— 跟随方可以直接用发起方给的地址，
- *       不必自己会解析音源（比聊天兜底通道更强）。</li>
- *   <li>协议透明：本通道只搬运 {@link Protocol.Msg} 的 JSON 字节，和服务端组件之间没有别的内容约定。</li>
+ *   <li>旧：{@code ClientPlayNetworking.send(Identifier, FriendlyByteBuf)}
+ *       ＋ {@code registerGlobalReceiver(Identifier, (client, handler, buf, sender) -> …)}</li>
+ *   <li>新：{@code send(CustomPacketPayload)} ＋ {@code registerGlobalReceiver(Type, (payload, context) -> …)} ✓</li>
+ * </ul>
+ * 载荷就是原来的那串字节（见 {@link CloudDiscRelayPayload} ✓），
+ * 所以协议本身（第 1 字节 TYPE_HELLO/TYPE_DATA ✓ 报到/应答 ✓ JSON 转发 ✓）与原版完全一致 ✓
+ *
+ * <p>特点（与原 0.13.1 相同 ✓）：
+ * <ul>
+ *   <li>有则用、无则自动降级：进服发报到，只有装了中继组件的服务器才应答 ✓</li>
+ *   <li>不受聊天长度限制 ⇒ {@link #carriesUri()} 为 true ✓ 跟随方可以直接用发起方的地址 ✓</li>
  * </ul>
  */
 public final class ServerRelayTransport implements Transport {
-	/** 应答有效期：超过这么久没再收到应答，就认为中继不可用（例如换了服务器）。 */
 	private static final long ACK_TTL_MILLIS = 600_000L;
-	/** 报到最多重试这么多次（每次间隔 3 秒）——避免在没有中继的服务器上无限发包。 */
 	private static final int MAX_HELLO_ATTEMPTS = 20;
 
 	private volatile Consumer<Protocol.Msg> listener;
@@ -34,36 +39,40 @@ public final class ServerRelayTransport implements Transport {
 	private volatile int helloAttempts;
 
 	public ServerRelayTransport() {
-		ClientPlayNetworking.registerGlobalReceiver(CloudDiscNet.RELAY, (client, handler, buf, sender) -> {
-			if (buf.readableBytes() < 1) {
-				return;
-			}
-			int first = buf.readByte() & 0xFF;
-			if (first == CloudDiscNet.TYPE_HELLO) {
-				// 第 2 个字节（可选）= 服务端的"约定版本"；没有这个字节的旧中继按 0 处理
-				int serverVersion = buf.readableBytes() >= 1 ? (buf.readByte() & 0xFF) : 0;
-				lastAckMillis = System.currentTimeMillis();
-				if (!announced) {
-					announced = true;
-					CloudDiscClient.LOGGER.info("[CloudDisc] 服务器中继可用（对端约定版本 {}，本端 {}），"
-							+ "跨公网同步将走它，且不再需要聊天兜底",
-							serverVersion, CloudDiscNet.CONVENTION_VERSION);
+		ClientPlayNetworking.registerGlobalReceiver(CloudDiscRelayPayload.TYPE, (payload, context) -> {
+			try {
+				byte[] raw = payload.data();
+				if (raw == null || raw.length < 1) {
+					return;
 				}
-				return;
-			}
-			byte[] data = new byte[buf.readableBytes()];
-			buf.readBytes(data);
-			Protocol.Msg msg = Protocol.fromJson(new String(data, StandardCharsets.UTF_8));
-			Consumer<Protocol.Msg> l = listener;
-			if (msg != null && l != null) {
-				l.accept(msg);
+				FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(raw));
+				int first = buf.readByte() & 0xFF;
+				if (first == CloudDiscNet.TYPE_HELLO) {
+					int serverVersion = buf.readableBytes() >= 1 ? (buf.readByte() & 0xFF) : 0;
+					lastAckMillis = System.currentTimeMillis();
+					if (!announced) {
+						announced = true;
+						CloudDiscClient.LOGGER.info("[CloudDisc] 服务器中继可用（对端约定版本 {}，本端 {}），跨公网同步将走它",
+								serverVersion, CloudDiscNet.CONVENTION_VERSION);
+					}
+					return;
+				}
+				byte[] data = new byte[buf.readableBytes()];
+				buf.readBytes(data);
+				Protocol.Msg msg = Protocol.fromJson(new String(data, StandardCharsets.UTF_8));
+				Consumer<Protocol.Msg> l = listener;
+				if (msg != null && l != null) {
+					l.accept(msg);
+				}
+			} catch (Throwable t) {
+				CloudDiscClient.LOGGER.debug("[CloudDisc] 中继接收失败: {}", t.toString());
 			}
 		});
 	}
 
 	@Override
 	public String name() {
-		return "relay";
+		return "server-relay";
 	}
 
 	@Override
@@ -76,24 +85,24 @@ public final class ServerRelayTransport implements Transport {
 		if (isReady() || helloAttempts >= MAX_HELLO_ATTEMPTS) {
 			return;
 		}
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.getNetworkHandler() == null) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.getConnection() == null) {
 			return;
 		}
 		helloAttempts++;
 		client.execute(() -> {
 			try {
-				PacketByteBuf buf = PacketByteBufs.create();
-				buf.writeByte(CloudDiscNet.TYPE_HELLO);
-				buf.writeByte(CloudDiscNet.CONVENTION_VERSION);
-				ClientPlayNetworking.send(CloudDiscNet.RELAY, buf);
+				if (!ClientPlayNetworking.canSend(CloudDiscRelayPayload.TYPE)) {
+					return; // 服务器没装中继组件 → 静默降级 ✓
+				}
+				ClientPlayNetworking.send(new CloudDiscRelayPayload(
+						new byte[] { (byte) CloudDiscNet.TYPE_HELLO, (byte) CloudDiscNet.CONVENTION_VERSION }));
 			} catch (Throwable t) {
 				CloudDiscClient.LOGGER.debug("[CloudDisc] 中继报到失败: {}", t.toString());
 			}
 		});
 	}
 
-	/** 每次进服重置重试计数。 */
 	public void resetAttempts() {
 		helloAttempts = 0;
 	}
@@ -104,13 +113,13 @@ public final class ServerRelayTransport implements Transport {
 			return;
 		}
 		byte[] json = Protocol.toBytes(msg);
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> {
 			try {
-				PacketByteBuf buf = PacketByteBufs.create();
-				buf.writeByte(CloudDiscNet.TYPE_DATA);
-				buf.writeBytes(json);
-				ClientPlayNetworking.send(CloudDiscNet.RELAY, buf);
+				byte[] out = new byte[json.length + 1];
+				out[0] = (byte) CloudDiscNet.TYPE_DATA;
+				System.arraycopy(json, 0, out, 1, json.length);
+				ClientPlayNetworking.send(new CloudDiscRelayPayload(out));
 			} catch (Throwable t) {
 				CloudDiscClient.LOGGER.debug("[CloudDisc] 中继发送失败: {}", t.toString());
 			}
@@ -122,7 +131,6 @@ public final class ServerRelayTransport implements Transport {
 		return isReady() ? 1 : 0;
 	}
 
-	/** 中继能带完整 URL（不受聊天 256 字符限制）。 */
 	@Override
 	public boolean carriesUri() {
 		return true;

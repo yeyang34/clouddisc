@@ -1,6 +1,6 @@
 package dev.clouddisc.disc;
 
-import net.minecraft.text.Text;
+import net.minecraft.network.chat.Component;
 
 /**
  * 唱片"名字即协议"。
@@ -27,11 +27,11 @@ public final class DiscName {
 	}
 
 	/** 是否为 CloudDisc 唱片。 */
-	public static boolean isCloudDisc(Text name, String prefix) {
+	public static boolean isCloudDisc(Component name, String prefix) {
 		return parse(name, prefix) != null;
 	}
 
-	public static SongQuery parse(Text name, String prefix) {
+	public static SongQuery parse(Component name, String prefix) {
 		if (name == null) {
 			return null;
 		}

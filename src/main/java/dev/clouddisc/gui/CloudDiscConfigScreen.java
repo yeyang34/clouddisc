@@ -2,12 +2,13 @@ package dev.clouddisc.gui;
 
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.BufferedReader;
@@ -27,7 +28,7 @@ import java.util.function.Supplier;
 /**
  * CloudDisc 配置界面（5 节：播放 / 物理声效 / 网络与音源 / 教程 / 更新日志）。
  *
- * <p><b>设计原则：零硬依赖。</b>只用原版控件（{@link ButtonWidget} / {@link TextFieldWidget}），
+ * <p><b>设计原则：零硬依赖。</b>只用原版控件（{@link Button} / {@link EditBox}），
  * 所以没装 Cloth Config / YACL / ModMenu 也照样能打开。
  * 三个入口：ModMenu 的模组列表按钮（装了才有）、快捷键（默认 K）、客户端命令 {@code /clouddisc}。
  *
@@ -60,7 +61,7 @@ public class CloudDiscConfigScreen extends Screen {
 	private static final int TEXT_LINE_HEIGHT = 11;
 	private static final int TEXT_BOTTOM_MARGIN = 36;
 
-	private record Label(Text text, int x, int y) {
+	private record Label(Component text, int x, int y) {
 	}
 
 	private final Screen parent;
@@ -93,7 +94,7 @@ public class CloudDiscConfigScreen extends Screen {
 	private List<String> textLines = List.of();
 
 	public CloudDiscConfigScreen(Screen parent) {
-		super(Text.literal("CloudDisc 云唱片"));
+		super(Component.literal("CloudDisc 云唱片"));
 		this.parent = parent;
 		CloudDiscConfig c = CloudDiscClient.config();
 		this.cfg = c != null ? c : CloudDiscConfig.get();
@@ -102,7 +103,7 @@ public class CloudDiscConfigScreen extends Screen {
 	@Override
 	protected void init() {
 		computeLayout();
-		clearChildren();
+		clearWidgets();
 		labels.clear();
 
 		boolean textSection = section >= SECTION_GUIDE;
@@ -124,27 +125,27 @@ public class CloudDiscConfigScreen extends Screen {
 		// 底部按钮与"控件列"对齐（左边缘 = 输入框左边缘），4 个等分这条列
 		int bw = Math.max(36, (layFieldW - 3 * 4) / 4);
 		int bx = layFieldX;
-		addDrawableChild(ButtonWidget.builder(Text.literal("◀ 上一节"), b -> {
+		addRenderableWidget(Button.builder(Component.literal("◀ 上一节"), b -> {
 			section = (section + SECTION_COUNT - 1) % SECTION_COUNT;
 			scroll = 0;
-			clearAndInit();
-		}).dimensions(bx, y, bw, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("下一节 ▶"), b -> {
+			rebuildWidgets();
+		}).bounds(bx, y, bw, 20).build());
+		addRenderableWidget(Button.builder(Component.literal("下一节 ▶"), b -> {
 			section = (section + 1) % SECTION_COUNT;
 			scroll = 0;
-			clearAndInit();
-		}).dimensions(bx + bw + 4, y, bw, 20).build());
+			rebuildWidgets();
+		}).bounds(bx + bw + 4, y, bw, 20).build());
 
-		ButtonWidget save = ButtonWidget.builder(Text.literal("保存"), b -> {
+		Button save = Button.builder(Component.literal("保存"), b -> {
 			cfg.save();
 			CloudDiscClient.LOGGER.info("[CloudDisc] 配置已保存到磁盘");
-			close();
-		}).dimensions(bx + 2 * (bw + 4), y, bw, 20).build();
+			onClose();
+		}).bounds(bx + 2 * (bw + 4), y, bw, 20).build();
 		save.visible = !textSection; // 只读页没有可保存的东西
-		addDrawableChild(save);
+		addRenderableWidget(save);
 
-		addDrawableChild(ButtonWidget.builder(Text.literal("关闭"), b -> close())
-				.dimensions(bx + 3 * (bw + 4), y, bw, 20).build());
+		addRenderableWidget(Button.builder(Component.literal("关闭"), b -> onClose())
+				.bounds(bx + 3 * (bw + 4), y, bw, 20).build());
 	}
 
 	// ------------------------------------------------------------ 第 1 节：播放
@@ -198,7 +199,7 @@ public class CloudDiscConfigScreen extends Screen {
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();
-		labels.add(new Label(Text.literal("状态: " + efx), (layLeft + 6), y));
+		labels.add(new Label(Component.literal("状态: " + efx), (layLeft + 6), y));
 	}
 
 	// ------------------------------------------------------- 第 3 节：网络与音源
@@ -223,36 +224,36 @@ public class CloudDiscConfigScreen extends Screen {
 
 	// ------------------------------------------------------------ 控件构造
 
-	private void row(int index, String label, ClickableWidget widget) {
+	private void row(int index, String label, AbstractWidget widget) {
 		int y = ROW_START + index * layRowStep;
 		int maxLabelW = Math.max(24, layFieldX - 10 - (layLeft + 6));
-		String shown = this.textRenderer.trimToWidth(label, maxLabelW);
-		labels.add(new Label(Text.literal(shown), layLeft + 6, y + Math.max(1, (layRowH - 9) / 2)));
-		addDrawableChild(widget);
+		String shown = this.font.plainSubstrByWidth(label, maxLabelW);
+		labels.add(new Label(Component.literal(shown), layLeft + 6, y + Math.max(1, (layRowH - 9) / 2)));
+		addRenderableWidget(widget);
 	}
 
 	private int rowY(int index) {
 		return ROW_START + index * layRowStep;
 	}
 
-	private TextFieldWidget textField(int index, String initial, Consumer<String> set) {
-		TextFieldWidget field = new TextFieldWidget(this.textRenderer, layFieldX, rowY(index),
-				FIELD_WIDTH, 20, Text.literal(""));
+	private EditBox textField(int index, String initial, Consumer<String> set) {
+		EditBox field = new EditBox(this.font, layFieldX, rowY(index),
+				FIELD_WIDTH, 20, Component.literal(""));
 		field.setMaxLength(200);
-		field.setText(initial == null ? "" : initial);
-		field.setChangedListener(set);
+		field.setValue(initial == null ? "" : initial);
+		field.setResponder(set);
 		return field;
 	}
 
-	private ButtonWidget toggle(int index, BooleanSupplier get, Consumer<Boolean> set) {
-		return ButtonWidget.builder(Text.literal(get.getAsBoolean() ? "开" : "关"), b -> {
+	private Button toggle(int index, BooleanSupplier get, Consumer<Boolean> set) {
+		return Button.builder(Component.literal(get.getAsBoolean() ? "开" : "关"), b -> {
 			boolean next = !get.getAsBoolean();
 			set.accept(next);
-			b.setMessage(Text.literal(next ? "开" : "关"));
-		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
+			b.setMessage(Component.literal(next ? "开" : "关"));
+		}).bounds(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
-	private ButtonWidget cycleInt(int index, int[] values, IntSupplier get, IntConsumer set) {
+	private Button cycleInt(int index, int[] values, IntSupplier get, IntConsumer set) {
 		int cur = 0;
 		for (int i = 0; i < values.length; i++) {
 			if (values[i] == get.getAsInt()) {
@@ -260,14 +261,14 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		final int[] idx = { cur };
-		return ButtonWidget.builder(Text.literal(String.valueOf(values[idx[0]])), b -> {
+		return Button.builder(Component.literal(String.valueOf(values[idx[0]])), b -> {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
-			b.setMessage(Text.literal(String.valueOf(values[idx[0]])));
-		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
+			b.setMessage(Component.literal(String.valueOf(values[idx[0]])));
+		}).bounds(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
-	private ButtonWidget cycleFloat(int index, float[] values, DoubleSupplier get, DoubleConsumer set) {
+	private Button cycleFloat(int index, float[] values, DoubleSupplier get, DoubleConsumer set) {
 		int cur = 0;
 		for (int i = 0; i < values.length; i++) {
 			if (Math.abs(values[i] - get.getAsDouble()) < 0.001) {
@@ -275,14 +276,14 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		final int[] idx = { cur };
-		return ButtonWidget.builder(Text.literal(fmt(values[idx[0]])), b -> {
+		return Button.builder(Component.literal(fmt(values[idx[0]])), b -> {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
-			b.setMessage(Text.literal(fmt(values[idx[0]])));
-		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
+			b.setMessage(Component.literal(fmt(values[idx[0]])));
+		}).bounds(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
-	private ButtonWidget cycleString(int index, String[] values, Supplier<String> get, Consumer<String> set) {
+	private Button cycleString(int index, String[] values, Supplier<String> get, Consumer<String> set) {
 		int cur = 0;
 		for (int i = 0; i < values.length; i++) {
 			if (values[i].equalsIgnoreCase(get.get())) {
@@ -290,11 +291,11 @@ public class CloudDiscConfigScreen extends Screen {
 			}
 		}
 		final int[] idx = { cur };
-		return ButtonWidget.builder(Text.literal(values[idx[0]]), b -> {
+		return Button.builder(Component.literal(values[idx[0]]), b -> {
 			idx[0] = (idx[0] + 1) % values.length;
 			set.accept(values[idx[0]]);
-			b.setMessage(Text.literal(values[idx[0]]));
-		}).dimensions(layFieldX, rowY(index), layFieldW, layRowH).build();
+			b.setMessage(Component.literal(values[idx[0]]));
+		}).bounds(layFieldX, rowY(index), layFieldW, layRowH).build();
 	}
 
 	/** 从 httpHeaders 里取出 X-Token 的值（界面上显示用）。 */
@@ -340,7 +341,7 @@ public class CloudDiscConfigScreen extends Screen {
 		return wrap(sb.toString(), this.width - 40);
 	}
 
-	/** 自己按像素宽度折行：只用 textRenderer.getWidth，避免依赖 OrderedText 那套 API。 */
+	/** 自己按像素宽度折行：只用 font.getWidth，避免依赖 OrderedText 那套 API。 */
 	private List<String> wrap(String text, int maxWidth) {
 		List<String> out = new ArrayList<>();
 		for (String paragraph : text.split("\n", -1)) {
@@ -351,7 +352,7 @@ public class CloudDiscConfigScreen extends Screen {
 			StringBuilder line = new StringBuilder();
 			for (int i = 0; i < paragraph.length(); i++) {
 				char c = paragraph.charAt(i);
-				if (line.length() > 0 && this.textRenderer.getWidth(line.toString() + c) > maxWidth) {
+				if (line.length() > 0 && this.font.width(line.toString() + c) > maxWidth) {
 					out.add(line.toString());
 					line.setLength(0);
 				}
@@ -374,66 +375,42 @@ public class CloudDiscConfigScreen extends Screen {
 		scroll = Math.max(0, Math.min(scroll, maxScroll()));
 	}
 
-	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		// 顶部标签栏：点一下切分区（与底部 ◀/▶ 等效）
-		if (button == 0 && mouseY >= 52 && mouseY < 70) {
-			int tabH = 18, gap = 6;
-			int avail = layRight - layLeft;
-			int[] w = new int[SECTION_COUNT];
-			for (int i = 0; i < SECTION_COUNT; i++) {
-				w[i] = Math.max(24, (avail - gap * (SECTION_COUNT - 1)) / SECTION_COUNT);
-			}
-			int x = layLeft;
-			for (int i = 0; i < SECTION_COUNT; i++) {
-				if (mouseX >= x && mouseX < x + w[i]) {
-					if (section != i) {
-						section = i;
-						scroll = 0;
-						clearAndInit();
-					}
-					return true;
-				}
-				x += w[i] + gap;
-			}
-		}
-		return super.mouseClicked(mouseX, mouseY, button);
-	}
+	// 【26.2】旧版  签名已移除（26.2 改用 KeyEvent / 交给控件自处理 ✓）
 
-	public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
-		if (section >= SECTION_GUIDE) {
-			scroll -= (int) Math.signum(amount) * 3;
-			clampScroll();
-			return true;
-		}
-		return super.mouseScrolled(mouseX, mouseY, amount);
-	}
+	// 【26.2】旧版 mouseScrolled 签名已移除（26.2 改用 KeyEvent / 交给控件自处理 ✓）
 
-	@Override
-	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		if (section >= SECTION_GUIDE) {
-			int page = linesPerPage();
-			switch (keyCode) {
-				case GLFW.GLFW_KEY_UP -> scroll -= 1;
-				case GLFW.GLFW_KEY_DOWN -> scroll += 1;
-				case GLFW.GLFW_KEY_PAGE_UP -> scroll -= page;
-				case GLFW.GLFW_KEY_PAGE_DOWN -> scroll += page;
-				case GLFW.GLFW_KEY_HOME -> scroll = 0;
-				case GLFW.GLFW_KEY_END -> scroll = maxScroll();
-				default -> {
-					return super.keyPressed(keyCode, scanCode, modifiers);
-				}
-			}
-			clampScroll();
-			return true;
-		}
-		return super.keyPressed(keyCode, scanCode, modifiers);
-	}
+	// 【26.2】旧版  签名已移除（26.2 改用 KeyEvent / 交给控件自处理 ✓）
 
 	// ------------------------------------------------------------ 渲染
 
+	// ===== 【26.2 关键修复】界面文字必须走 ActiveTextCollector（textRenderer()）=====
+	// 26.2 的 GuiGraphicsExtractor.text(...)/centeredText(...) 只登记"可交互/悬停文字"✗
+	// 所以之前界面上一个字都看不到 ✗ 正门是 textRenderer().accept(...) ✓
+	// 这两个 helper 的参数形状与旧调用【完全一致】（只是省掉了 font ✓）→ 调用点可以整体替换 ✓
+	private void drawText(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			net.minecraft.network.chat.Component text, int x, int y, int color) {
+		ctx.textRenderer().accept(x, y, text);
+	}
+
+	private void drawText(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			String text, int x, int y, int color) {
+		ctx.textRenderer().accept(x, y, net.minecraft.network.chat.Component.literal(text));
+	}
+
+	private void drawCentered(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			net.minecraft.network.chat.Component text, int centerX, int y, int color) {
+		ctx.textRenderer().accept(net.minecraft.client.gui.TextAlignment.CENTER, centerX, y, text);
+	}
+
+	private void drawCentered(net.minecraft.client.gui.GuiGraphicsExtractor ctx,
+			String text, int centerX, int y, int color) {
+		ctx.textRenderer().accept(net.minecraft.client.gui.TextAlignment.CENTER, centerX, y,
+				net.minecraft.network.chat.Component.literal(text));
+	}
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		// 【26.2】先铺一层半透明底（等价于旧 renderBackground ✓ 但必须画在最前面）
+		context.fill(0, 0, this.width, this.height, 0x40000000);
 		// ---------------- 设计层（只画装饰，不碰任何功能） ----------------
 		int cx = this.width / 2;
 		// 顶部标题带 + 主色细线
@@ -481,21 +458,23 @@ public class CloudDiscConfigScreen extends Screen {
 					context.fill(x, y + tabH - 1, x + w[i], y + tabH, 0x503A3A40);
 				}
 				int tc = active ? 0xFFFFFFFF : (hover ? 0xFFE6E6EA : 0xFF9A9AA5);
-				context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(SECTION_NAMES[i]),
+		// 【26.2】控件要画在装饰之上、文字之下 ⇒ super 放在这里 ✓
+		super.extractRenderState(context, mouseX, mouseY, delta);
+				drawCentered(context, Component.literal(SECTION_NAMES[i]),
 						x + w[i] / 2, y + 5, tc);
 				x += w[i] + gap;
 			}
 		}
 		// ---------------- 装饰到此为止，下面全是原有绘制 ----------------
-		this.renderBackground(context);
-		context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 8, 0xFFFFFF);
+		// 【26.2 修复】原来这行不透明遮罩画在所有文字之后 → 把 UI 盖住（表现为「界面没有文字」）✗ 已挪到方法最前面 ✓
+		drawCentered(context, this.title, this.width / 2, 8, 0xFFFFFF);
 		// 标语 + 一句话定位
-		context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(CloudDiscClient.SLOGAN),
+		drawCentered(context, Component.literal(CloudDiscClient.SLOGAN),
 				this.width / 2, 18, 0xFFC840);
-		context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(CloudDiscClient.TAGLINE),
+		drawCentered(context, Component.literal(CloudDiscClient.TAGLINE),
 				this.width / 2, 28, 0x909090);
 		String header = "第 " + (section + 1) + " / " + SECTION_COUNT + " 节 · " + SECTION_NAMES[section];
-		context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(header), this.width / 2, 39, 0xA0E0A0);
+		drawCentered(context, Component.literal(header), this.width / 2, 39, 0xA0E0A0);
 
 		if (section >= SECTION_GUIDE) {
 			int perPage = linesPerPage();
@@ -505,25 +484,117 @@ public class CloudDiscConfigScreen extends Screen {
 				String line = textLines.get(i);
 				// 小节标题（用 ═ 或 ─ 包起来的行）高亮一下，便于扫读
 				int color = line.startsWith("═") || line.startsWith("─") ? 0x9FE08A : 0xE0E0E0;
-				context.drawTextWithShadow(this.textRenderer, line, 20, y, color);
+				drawText(context, line, 20, y, color);
 				y += TEXT_LINE_HEIGHT;
 			}
 			String hint = (scroll > 0 || maxScroll() > 0)
 					? "滚轮 / ↑↓ / PgUp PgDn 翻阅　（" + (scroll + 1) + " - " + end + " / " + textLines.size() + " 行）"
 					: "";
-			context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), this.width / 2, this.height - 40, 0x909090);
+			drawCentered(context, Component.literal(hint), this.width / 2, this.height - 40, 0x909090);
 		} else {
 			for (Label label : labels) {
-				context.drawTextWithShadow(this.textRenderer, label.text(), label.x(), label.y(), 0xE0E0E0);
+				drawText(context, label.text(), label.x(), label.y(), 0xE0E0E0);
 			}
 		}
-		super.render(context, mouseX, mouseY, delta);
+		// 【26.2】super 必须最先调用（它画界面底色），否则会把我们画的文字全盖住 ✗
 	}
 
+	/**
+	 * 【26.2】教程页 / 更新日志页：滚轮翻页。
+	 * 签名来自 javap 实测：mouseScrolled(double,double,double,double) ✓
+	 */
 	@Override
-	public void close() {
-		if (this.client != null) {
-			this.client.setScreen(this.parent);
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		try {
+			if (section >= SECTION_GUIDE) {
+				int perPage = linesPerPage();
+				int max = maxScroll();
+				if (scrollY < 0) {
+					scroll = Math.min(max, scroll + 1);
+				} else if (scrollY > 0) {
+					scroll = Math.max(0, scroll - 1);
+				}
+				CloudDiscClient.LOGGER.info("[CloudDisc] 配置界面滚轮: scrollY={} → scroll={}/{}（共 {} 行，每页 {}）",
+						scrollY, scroll, max, textLines.size(), perPage);
+				return true;
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 滚轮处理异常: {}", t.toString());
+		}
+		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+	}
+
+	/**
+	 * 【26.2】教程页 / 更新日志页：↑↓ / PgUp / PgDn 翻页。
+	 * 签名来自 javap 实测：keyPressed(net.minecraft.client.input.KeyEvent) ✓
+	 * KeyEvent 访问器：key() / scancode() / modifiers() ✓
+	 */
+	@Override
+	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+		try {
+			if (section >= SECTION_GUIDE) {
+				int k = event.key();
+				int perPage = linesPerPage();
+				int max = maxScroll();
+				boolean changed = true;
+				if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_DOWN) {
+					scroll = Math.min(max, scroll + 1);
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_UP) {
+					scroll = Math.max(0, scroll - 1);
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_DOWN) {
+					scroll = Math.min(max, scroll + Math.max(1, perPage - 1));
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP) {
+					scroll = Math.max(0, scroll - Math.max(1, perPage - 1));
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_HOME) {
+					scroll = 0;
+				} else if (k == org.lwjgl.glfw.GLFW.GLFW_KEY_END) {
+					scroll = max;
+				} else {
+					changed = false;
+				}
+				if (changed) {
+					CloudDiscClient.LOGGER.info("[CloudDisc] 配置界面按键翻页: key={} → scroll={}/{}", k, scroll, max);
+					return true;
+				}
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 按键处理异常: {}", t.toString());
+		}
+		return super.keyPressed(event);
+	}
+	@Override
+	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
+		// 【26.2】顶部胶囊标签栏是手绘的（不是控件）→ 必须在这里手动命中判定 ✓
+		try {
+			int tabH = 18, gap = 6;
+			int avail = layRight - layLeft;
+			int[] w = new int[SECTION_COUNT];
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				w[i] = Math.max(24, (avail - gap * (SECTION_COUNT - 1)) / SECTION_COUNT);
+			}
+			int x = layLeft;
+			int y = 52;
+			double mx = event.x();
+			double my = event.y();
+			for (int i = 0; i < SECTION_COUNT; i++) {
+				if (mx >= x && mx < x + w[i] && my >= y && my < y + tabH) {
+					section = i;
+					scroll = 0;
+					rebuildWidgets();
+					return true;
+				}
+				x += w[i] + gap;
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] tab 命中判定异常（已忽略）: {}", t.toString());
+		}
+		return super.mouseClicked(event, doubleClick);
+	}
+
+
+	public void onClose() {
+		if (this.minecraft != null) {
+			Minecraft.getInstance().setScreenAndShow(this.parent);
 		}
 	}
 }

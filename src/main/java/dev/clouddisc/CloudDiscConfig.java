@@ -174,7 +174,10 @@ public final class CloudDiscConfig {
 	public boolean physicsSoundDirection = true;
 
 	/** 是否允许聊天通道作为兜底信令/数据通道。 */
-	public boolean enableChatRelay = true;
+	/** 【单曲循环】一张云唱片播完后，自动回到开头继续播（默认开 ✓）。 */
+	public boolean loopSingle = true;   // 单曲循环：播完自动回到开头   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
+
+	public boolean enableChatRelay = false;   // 聊天兜底：默认关闭（会刷聊天栏）；同步优先走服务器中继 / UDP
 	/**
 	 * 聊天通道是否只作兜底（默认<b>开</b>）。
 	 * <p>开（推荐）：中继或 UDP 任一可用时，聊天通道自动静音 —— 没装 Mod 的玩家不会看到

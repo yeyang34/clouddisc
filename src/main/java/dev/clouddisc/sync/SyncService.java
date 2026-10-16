@@ -4,16 +4,16 @@ import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
 import dev.clouddisc.jukebox.JukeboxSession;
 import dev.clouddisc.jukebox.PlaybackController;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
-import net.minecraft.block.Blocks;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -76,40 +76,40 @@ public final class SyncService implements PlaybackController.Announcer {
 	// ------------------------------------------------------------ 事件入口
 
 	/** 来自 {@code ClientWorldMixin}：原版世界事件 1010/1011。 */
-	public PlaybackController.Decision onWorldEvent(ClientWorld world, BlockPos pos, int eventId, int data) {
-		// 注意：Yarn 的 World#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
+	public PlaybackController.Decision onWorldEvent(ClientLevel world, BlockPos pos, int eventId, int data) {
+		// 注意：Yarn 的 Level#getTime() == Mojang 的 getGameTime()（"不可修改/冻结"的单调刻）；
 		// 千万不要用 getTimeOfDay()（会被 /time 改、会被 doDaylightCycle 冻住）。
-		return playback.onWorldEvent(world.getRegistryKey().getValue(), pos, eventId, data, world.getTime());
+		return playback.onWorldEvent(world.dimension().identifier(), pos, eventId, data, world.getGameTime());
 	}
 
 	/** 来自 {@code UseBlockCallback}：本地玩家右键方块。 */
-	public ActionResult onUseBlock(PlayerEntity player, World world, Hand hand, BlockHitResult hit) {
-		if (!world.isClient() || hand != Hand.MAIN_HAND) {
-			return ActionResult.PASS;
+	public InteractionResult onUseBlock(Player player, Level world, InteractionHand hand, BlockHitResult hit) {
+		if (!world.isClientSide() || hand != InteractionHand.MAIN_HAND) {
+			return InteractionResult.PASS;
 		}
-		if (!world.getBlockState(hit.getBlockPos()).isOf(Blocks.JUKEBOX)) {
-			return ActionResult.PASS;
+		if (!world.getBlockState(hit.getBlockPos()).is(Blocks.JUKEBOX)) {
+			return InteractionResult.PASS;
 		}
-		ItemStack stack = player.getStackInHand(hand);
+		ItemStack stack = player.getItemInHand(hand);
 		if (stack.isEmpty()) {
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		}
-		playback.noteLocalUse(world.getRegistryKey().getValue(), hit.getBlockPos(), stack.getName());
-		return ActionResult.PASS;
+		playback.noteLocalUse(world.dimension().identifier(), hit.getBlockPos(), stack.getHoverName());
+		return InteractionResult.PASS;
 	}
 
-	public void tick(MinecraftClient mc) {
-		if (mc.world == null) {
+	public void tick(Minecraft mc) {
+		if (mc.level == null) {
 			return;
 		}
-		long now = mc.world.getTime();
+		long now = mc.level.getGameTime();
 		// 中途加入时的主动询问：**问到有结果为止**（每 2 秒一次，最多 30 秒）
 		//
 		// 改成这样的原因（实测偶现："退出世界再回来有时不播放，时好时坏"）：
 		// 老的写法是进服后固定问 3 次（1/3/10 秒）。如果这 3 次恰好都撞上
 		// "此刻还没发现同伴"（消息被丢弃）或应答丢失，就**再也不会重试** → 静音。
 		// 现在只要还没有会话就一直问下去，直到 30 秒为止。
-		if (!queryDone && mc.world != null && now >= nextQueryTick) {
+		if (!queryDone && mc.level != null && now >= nextQueryTick) {
 			if (playback.sessionCount() > 0) {
 				queryDone = true;
 				CloudDiscClient.LOGGER.info("[CloudDisc] 询问已有结果（本机已建立会话）");
@@ -127,7 +127,7 @@ public final class SyncService implements PlaybackController.Announcer {
 		// 应答一过期就会出现一段"没有任何通道"的窗口（日志里 relay=0, chat=0），
 		// 恰好在这段窗口里放碟 → PLAY 发不出去 → 跟随方回落原版（表现为"时好时坏"）。
 		// 现在每 20 秒续一次（远小于应答有效期），通道基本恒为可用。
-		if (relayTransport != null && mc.world != null) {
+		if (relayTransport != null && mc.level != null) {
 			relayHelloCooldown--;
 			if (relayHelloCooldown <= 0) {
 				relayHelloCooldown = 400;   // 20 秒
@@ -142,8 +142,8 @@ public final class SyncService implements PlaybackController.Announcer {
 	public void onJoin() {
 		// 中途加入：原版不会给新来的玩家重发 1010 事件，所以必须自己主动问一轮。
 		// 第一次问可能还没有发现同伴（组播发现要约 2 秒），所以在 +1s / +3s / +10s 各问一次。
-		MinecraftClient mc = MinecraftClient.getInstance();
-		long now = mc.world == null ? 0L : mc.world.getTime();
+		Minecraft mc = Minecraft.getInstance();
+		long now = mc.level == null ? 0L : mc.level.getGameTime();
 		joinTick = now;
 		queryDone = false;
 		nextQueryTick = now + 20L;
@@ -337,12 +337,12 @@ public final class SyncService implements PlaybackController.Announcer {
 			}
 		}
 		// 通道线程 → 客户端线程
-		MinecraftClient.getInstance().execute(() -> {
-			ClientWorld world = MinecraftClient.getInstance().world;
+		Minecraft.getInstance().execute(() -> {
+			ClientLevel world = Minecraft.getInstance().level;
 			if (world == null) {
 				return;
 			}
-			playback.onMessage(m, world.getTime());
+			playback.onMessage(m, world.getGameTime());
 		});
 	}
 }

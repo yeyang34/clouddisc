@@ -70,6 +70,12 @@ public final class NeteaseLinkProvider implements MusicProvider {
 							+ "注意 163cn.tv 短链无法解析（它只会跳到网页），请用完整页面链接。"));
 		}
 		String endpoint = cfg.neteaseEndpoint;
+		if (endpoint == null || endpoint.isBlank()) {
+			// 【26.2 修正】配置里存的是空串时，回退到编译期预设的解析服务（PresetResolver）。
+			// 之前的逻辑只在 CloudDiscConfig 构造时赋预设值，读盘后空串会把它覆盖掉，
+			// 于是"开箱即用"失效、退化成直连 music.163.com（VIP/部分曲目会返回 HTML 404）。
+			endpoint = dev.clouddisc.PresetResolver.ENDPOINT;
+		}
 		if (endpoint != null && !endpoint.isBlank()) {
 			return MusicJson.query(endpoint.replace("{id}", songId), cfg, songId, id());
 		}

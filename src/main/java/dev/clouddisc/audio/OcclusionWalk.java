@@ -1,7 +1,7 @@
 package dev.clouddisc.audio;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * "沿射线逐格累加遮挡" —— 把"世界查询 / 材质取值"与"累加逻辑"解耦的纯逻辑层，
@@ -20,7 +20,7 @@ public final class OcclusionWalk {
 	 *         {@code < 0} = 有实体但射线没被它打到（例如从楼梯的缝里过）——不累加，但计入"实心格"统计
 	 */
 	public interface Cell {
-		double occlusionAt(BlockPos pos, Vec3d from, Vec3d to);
+		double occlusionAt(BlockPos pos, Vec3 from, Vec3 to);
 	}
 
 	/** 一次累加的结果（含诊断计数：走格 / 实心格 / 判定为挡）。 */
@@ -49,7 +49,7 @@ public final class OcclusionWalk {
 	 * @param maxSteps DDA 最多访问多少格（性能上限）
 	 * @param maxOcc   累加上限（到了就停，避免超厚的地基把增益压到听不见）
 	 */
-	public static Result accumulate(Vec3d from, Vec3d to, int maxSteps, double maxOcc, Cell cell) {
+	public static Result accumulate(Vec3 from, Vec3 to, int maxSteps, double maxOcc, Cell cell) {
 		Result out = new Result();
 		if (from == null || to == null || cell == null) {
 			return out;

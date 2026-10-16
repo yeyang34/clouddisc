@@ -15,16 +15,37 @@ public final class AudioPipeline implements AutoCloseable {
 	/** 每毫秒字节数：48000 * 2 / 1000。 */
 	public static final int BYTES_PER_MS = OUT_RATE * 2 / 1000;
 	/** 环形缓冲容量：4 秒。 */
-	public static final int RING_BYTES = BYTES_PER_MS * 4000;
+	// 【26.2】原来 4000ms 太小 ✗：开播前解码器会提前写入 ✗ 一旦绕圈就把【开头】覆盖掉 ✗
+	// （实测症状：音乐开头少一点 ✗ 结束处也少一点 ✗）→ 加到 12 秒 ✓ 留足余量 ✓
+	public static final int RING_BYTES = BYTES_PER_MS * 12000;
 
-	private final PcmSource source;
+	private PcmSource source;   // 26.2 改成可变：循环时用工厂重新打开音源
+	private java.util.function.Supplier<PcmSource> sourceFactory;
+	private volatile long lastLoopNanos = 0L;
+
+	public void setSourceFactory(java.util.function.Supplier<PcmSource> f) { this.sourceFactory = f; }
 	private final PcmRingBuffer ring;
 	private final int inRate;
 	private final int inChannels;
 	private final float outputGain;
-	private final Thread worker;
+	private Thread worker;   // 循环时需要重启解码线程 ✓ 所以不能是 final ✓
 	private final AtomicLong writtenBytes = new AtomicLong();
 	private volatile boolean running = true;
+
+	/** 【26.2 · 单曲循环】为 true 时，解码到结尾不结束流，而是回到 0 秒继续解码 ✓ */
+	private volatile boolean loopForever = false;
+	/** 【循环信号】解码线程已经读到文件尾（与 ring.finish() 无关 ✓ 后者会结束整条流 ✗） */
+	private volatile boolean reachedEnd = false;
+
+	public boolean reachedEnd() { return reachedEnd; }
+	private volatile int loopCount = 0;
+
+	/** 由 PlaybackController 按配置 loopSingle 设置 ✓ */
+	public void setLoopForever(boolean v) { this.loopForever = v; }
+
+	public boolean isLoopForever() { return loopForever; }
+
+	public int loopCount() { return loopCount; }
 	/** 已输出音频的峰值（用于诊断"是不是被削顶了"）。 */
 	private volatile float peak;
 	private volatile boolean peakLogged;
@@ -46,6 +67,15 @@ public final class AudioPipeline implements AutoCloseable {
 		this.inRate = Math.max(1, source.sampleRate());
 		this.inChannels = Math.max(1, source.channels());
 		this.outputGain = Math.max(0.05f, Math.min(2.0f, outputGain));
+		// 26.2 单曲循环开关：默认跟随配置 loopSingle ✓
+		// 注意：这行必须放在 try 的【正常路径】里 ✗ 放进 catch 就永远走不到 ✗（踩过）
+		try {
+			// 循环改由【原版引擎】负责（isLooping + read 返回 null）✓ 这里关闭自带循环 ✗
+			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
+		} catch (Throwable ignored) {
+			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
+		}
+
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");
 		this.worker.setDaemon(true);
 		this.worker.start();
@@ -54,6 +84,55 @@ public final class AudioPipeline implements AutoCloseable {
 	/** 已输出音频的峰值（1.0 = 满刻度；接近或等于 1.0 说明正在削顶）。 */
 	public float peak() {
 		return peak;
+	}
+
+	/**
+	 * 【单曲循环】读取到真实结尾时重开音源 ✓
+	 * 为什么不用 seek ✗：实测 seekSample(0) 之后位置回不到 0 ✗ 会空转且只剩一秒 ✓
+	 * 做法：用工厂新建一个音源 ✓ 关掉旧的 ✓ 再让解码线程从 0 帧重新开始 ✓
+	 * @return 是否成功重开
+	 */
+	/** 本次"到底"是否已经重开过音源 ✓（避免流端反复重踢时反复关/开音源 ✗ 那会让解码线程踩空 ⇒ 结束流 ✗） */
+	private volatile boolean reopenedForThisEnd = false;
+
+	public boolean restartForLoop() {
+		if (this.reopenedForThisEnd) {
+			// 已经重开过一次了 ✓ 只补发 seek 请求（幂等 ✓ 不碰音源 ✓）
+			this.requestSeek(0L);
+			return true;
+		}
+		java.util.function.Supplier<PcmSource> f = this.sourceFactory;
+		if (f == null) {
+			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开失败: 没有音源工厂");
+			return false;
+		}
+		PcmSource fresh = null;
+		try {
+			fresh = f.get();
+		} catch (Throwable t) {
+			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开音源异常: {}", t.toString());
+		}
+		if (fresh == null) {
+			return false;
+		}
+		try {
+			this.source.close();
+		} catch (Throwable ignored) {
+		}
+		this.source = fresh;
+		this.reopenedForThisEnd = true;   // 标记：本次到底已重开 ✓
+		// ① 复位环形缓冲：EOF 时 finish() 把 finished 置成了 true ✗
+		//    不复位的话 write() 会直接丢弃 ✓ read() 永远返回 -1 ✗（实测就是这样 ✗）
+		this.ring.restart();
+		// 【重要】这里【不要】新起解码线程 ✗
+		// 老线程读到文件尾后并没有退出 ✓ 它正在原地等 seek 请求 ✓
+		// 再起一个 ⇒ 两个线程同时往同一个环形缓冲写 ✗ 数据错乱 ⇒ 第二遍之后就没声 ✓（实测第三遍没声 ✓）
+		// 正确做法：只靠下面那句 requestSeek(0) 踢醒老线程 ✓
+		// 强制让解码线程执行一次 seek(0)：把已应用位置置成不可能值 ✓
+		this.appliedSeekMs = Long.MIN_VALUE;
+		this.requestSeek(0L);
+		CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环: 已重开音源并从 0 继续播放 ✓");
+		return true;
 	}
 
 	public PcmRingBuffer ring() {
@@ -149,6 +228,8 @@ public final class AudioPipeline implements AutoCloseable {
 					ring.clear();
 					writtenBytes.set(BYTES_PER_MS * seek);
 					appliedSeekMs = seek;
+					this.reopenedForThisEnd = false;   // 新一轮开始 ✓ 允许下次到底时再重开 ✓
+					this.reachedEnd = false;   // 已重新开始解码 ✓ 清信号 ✓
 					synchronized (this) {
 						notifyAll();
 					}
@@ -209,9 +290,59 @@ public final class AudioPipeline implements AutoCloseable {
 				// 4) 补充输入
 				int n = source.read(in, in.length);
 				if (n <= 0) {
+					// ===== 26.2 修复：循环不再被尾部短读误触发 =====
+					// 流式 MP3 在尾部可能返回 0（短读/欠载），原来一律当成到结尾，
+					// 于是最后那一小截没播完就回到开头（实测反馈：剩一点就被掐断重播）。
+					// 新判据：只有【已解码位置 >= 已知总长】才算真到结尾。
+					long posF = -1L, totF = -1L, durMs = -1L;
+					try { posF = source.positionSample(); totF = source.totalSamples(); durMs = source.durationMillis(); } catch (Throwable ig) { }
+					boolean reallyEnd;
+					if (totF > 0) {
+						reallyEnd = posF >= totF - (long) inRate;
+					} else if (durMs > 0) {
+						reallyEnd = posF >= (durMs - 1000L) * inRate / 1000L;
+					} else {
+						reallyEnd = true;
+					}
+					CloudDiscAudio.LOG.info("[CloudDisc] 解码到底: n={} 位置={}帧 总帧={} 时长={}ms 真结尾={} loopForever={}",
+							n, posF, totF, durMs, reallyEnd, loopForever);
+					if (!reallyEnd) {
+						// 只是暂时读不到：等一下继续读，绝不回开头
+						try { Thread.sleep(5L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+						continue;
+					}
+					// 【单曲循环 · 最终方案】完全在管线内部完成 ✓ 不依赖流端 ✓ 不垫静音 ✓
+					// 三个关键点：
+					//   ① 绝不 ring.finish() ✗（一 finish 流端就 EOF ⇒ 播放断掉 ✓）
+					//   ② 绝不 ring.clear()  ✗（缓冲里还留着上一遍的尾巴 ⇒ 正是它让衔接无缝 ✓）
+					//   ③ 换上新音源后【直接 continue 接着解码】✓ 新数据自然接到缓冲尾部 ✓
+					if (loopForever && sourceFactory != null) {
+						PcmSource fresh = null;
+						try {
+							fresh = sourceFactory.get();
+						} catch (Throwable t) {
+							CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开音源异常: {}", t.toString());
+						}
+						if (fresh != null) {
+							try {
+								source.close();
+							} catch (Throwable ignored) {
+							}
+							source = fresh;
+							len = 0;
+							pos = 0.0;
+							writtenBytes.set(0L);
+							appliedSeekMs = 0L;
+							requestedSeekMs = 0L;
+							loopCount++;
+							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环: 已在管线内接上下一遍（第 {} 次）✓", loopCount);
+							continue;
+						}
+						CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开失败（音源工厂返回空）⇒ 结束播放");
+					}
 					ring.finish();
 					return;
-				}
+				}   // ← 闭合 if (n <= 0) 块 ✓（之前漏了这个括号 ✗）
 				int frames = n / inChannels;
 				if (len + frames > buf.length) {
 					buf = java.util.Arrays.copyOf(buf, Math.max(buf.length * 2, len + frames));

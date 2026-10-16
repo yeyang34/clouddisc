@@ -11,15 +11,15 @@ import dev.clouddisc.disc.DiscName;
 import dev.clouddisc.music.MusicProvider;
 import dev.clouddisc.music.Providers;
 import dev.clouddisc.sync.Protocol;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.item.Item;
-import net.minecraft.item.MusicDiscItem;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Item; // [26.2] 唱片物品体系变了（JukeboxPlayable），先用 Item 占位
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -132,9 +132,9 @@ public final class PlaybackController {
 	}
 
 	private static long now() {
-		ClientWorld world = MinecraftClient.getInstance().world;
+		ClientLevel world = Minecraft.getInstance().level;
 		// Yarn getTime() == Mojang getGameTime()：只增不减、不受 /time 与 doDaylightCycle 影响
-		return world == null ? 0L : world.getTime();
+		return world == null ? 0L : world.getGameTime();
 	}
 
 	public List<JukeboxSession> sessions() {
@@ -144,7 +144,7 @@ public final class PlaybackController {
 	// ------------------------------------------------------------ 入口：本地
 
 	/** 玩家右键把唱片放进唱片机（客户端预测阶段）。 */
-	public void noteLocalUse(Identifier dim, BlockPos pos, Text itemName) {
+	public void noteLocalUse(Identifier dim, BlockPos pos, Component itemName) {
 		DiscName.SongQuery query = DiscName.parse(itemName, cfg.discNamePrefix);
 		if (query == null) {
 			return;
@@ -235,6 +235,8 @@ public final class PlaybackController {
 		}
 
 		if (eventId == 1011) {
+			// 【诊断 · 拔碟卡顿】分段计时 ✓ 下次日志就能看出卡在哪一步 ✓
+			final long __t0 = System.nanoTime();
 			// 【0.9.0 起的行为】原版怎么通知，我们就怎么停 —— 干净、可预期：
 			//   · 自然放完（到唱片标称时长）→ 停
 			//   · 玩家拔碟 / 换碟             → 停（换碟随后会有新的 1010 接管）
@@ -243,10 +245,16 @@ public final class PlaybackController {
 			// 这样音乐 mod 自己永远不需要猜"这次 1011 是哪种"，也就不会出现
 			// "停不下来 / 换不了碟"那种别扭行为。
 			JukeboxSession live = sessions.remove(key);
+			final long __t1 = System.nanoTime();
 			CloudDiscClient.LOGGER.info("[CloudDisc] 收到世界事件 1011（唱片机停止/取出唱片）@ {}｜本机有会话={}", pos, live != null);
 			if (live != null) {
 				live.dispose();
+				final long __t2 = System.nanoTime();
+				dev.clouddisc.easteregg.JellyEffect.deactivate();   // 拔碟/换碟 ⇒ 彩蛋立刻消失 ✓
 				announcer.announceStop(live, nowTick);
+				final long __t3 = System.nanoTime();
+				CloudDiscClient.LOGGER.info("[CloudDisc] 拔碟耗时: 取会话 {}ms / dispose {}ms / 广播 {}ms / 合计 {}ms",
+						(__t1 - __t0) / 1000000L, (__t2 - __t1) / 1000000L, (__t3 - __t2) / 1000000L, (__t3 - __t0) / 1000000L);
 				return Decision.CANCEL;
 			}
 			holds.remove(key);
@@ -260,13 +268,18 @@ public final class PlaybackController {
 	 * 前者我们要继续放，后者必须真的停。
 	 */
 	private static boolean recordStillInserted(String dimId, BlockPos pos) {
-		MinecraftClient mc = MinecraftClient.getInstance();
-		if (mc.world == null || !mc.world.getRegistryKey().getValue().toString().equals(dimId)) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null || !mc.level.dimension().identifier().toString().equals(dimId)) {
 			return false;
 		}
-		net.minecraft.block.BlockState state = mc.world.getBlockState(pos);
-		return state.contains(net.minecraft.block.JukeboxBlock.HAS_RECORD)
-				&& state.get(net.minecraft.block.JukeboxBlock.HAS_RECORD);
+		// 【26.2】1.20.1 的 JukeboxBlock.HAS_RECORD 属性没了 ✗
+		// 26.2 改成：直接看方块实体里那张唱片还在不在（javap 实测 getTheItem() ✓）
+		net.minecraft.world.level.block.entity.BlockEntity be = mc.level.getBlockEntity(pos);
+		if (be instanceof net.minecraft.world.level.block.entity.JukeboxBlockEntity jb) {
+			net.minecraft.world.item.ItemStack stack = jb.getTheItem();
+			return stack != null && !stack.isEmpty();
+		}
+		return false;
 	}
 
 	// ------------------------------------------------------------- 入口：消息
@@ -314,7 +327,7 @@ public final class PlaybackController {
 				s.durationMs = m.durMs;
 				if (Protocol.T_ANSWER.equals(m.t) && m.posMs > 0L) {
 					// 【重进服 / 中途加入】必须用对方给出的"内容位置"定位，**不能**用跨客户端刻换算：
-					// 刚进服的客户端 world.getTime() 与房主能差几万刻（实测 -28440 刻、甚至 -1000900ms），
+					// 刚进服的客户端 world.getGameTime() 与房主能差几万刻（实测 -28440 刻、甚至 -1000900ms），
 					// 算出来的位置要么离谱、要么越过文件末尾 —— 表现就是"根本不播放"。
 					s.localStartTick = nowTick - m.posMs / 50L;
 					CloudDiscClient.LOGGER.info("[CloudDisc] 按对方的内容位置定位: {}ms（重进服/中途加入）", m.posMs);
@@ -369,8 +382,8 @@ public final class PlaybackController {
 					Long last = queryCooldown.get(qKey);
 					if (last == null || nowTick - last > 60L) {
 						queryCooldown.put(qKey, nowTick);
-						CloudDiscClient.LOGGER.info("[CloudDisc] 收到未知坐标的心跳，主动询问该处会话 @ {}", BlockPos.fromLong(m.pos));
-						announcer.announceQuery(m.dim, BlockPos.fromLong(m.pos), nowTick);
+						CloudDiscClient.LOGGER.info("[CloudDisc] 收到未知坐标的心跳，主动询问该处会话 @ {}", BlockPos.of(m.pos));
+						announcer.announceQuery(m.dim, BlockPos.of(m.pos), nowTick);
 					}
 				}
 			}
@@ -451,6 +464,18 @@ public final class PlaybackController {
 		// 不再跟着音频块（约 85ms/块）走。传 s.instance 是为了按声音实例精确反查 source id。
 		// 之前插在"发起方心跳块"里 → 跟随方（就是听的人）永远不评估 → 隔墙毫无变化。
 		dev.clouddisc.audio.Acoustics.tick(s.pos(), s.instance, nowTick);
+		// 【彩蛋 · 果冻】只在"正在播放触发曲"的那台唱片机上生效；一旦停/换碟/拔碟立刻消失 ✓
+		try {
+			boolean jellyPlaying = s.state == JukeboxSession.State.PLAYING
+					&& dev.clouddisc.easteregg.JellyEffect.TRIGGER_TRACK_ID.equals(s.trackId);
+			if (jellyPlaying) {
+				var jb = s.pos();
+				dev.clouddisc.easteregg.JellyEffect.update(true, jb.getX() + 0.5, jb.getY() + 0.5, jb.getZ() + 0.5, 20.0);   // 半径 20 格（原 10 ✗ 已翻倍 ✓）
+			} else {
+				dev.clouddisc.easteregg.JellyEffect.deactivate();
+			}
+		} catch (Throwable ignored) {
+		}
 		long sinceStart = nowTick - s.startedTick;
 		if (sinceStart >= 20L && !s.consumptionLogged1s) {
 			s.consumptionLogged1s = true;
@@ -514,6 +539,11 @@ public final class PlaybackController {
 			long playedTo = s.msAtStart + (nowTick - s.startedTick) * 50L;
 			long realEnd = s.durationMs > 0L ? s.durationMs : pipe.durationMs();
 			if (realEnd > 0L && playedTo > realEnd + 500L) {
+				if (cfg.loopSingle) {
+					// 【单曲循环】回到 0 秒无缝重播 ✓
+				// 【26.2】循环已交给解码管线内部 ✓ 这里不再重开声音实例 ✗（否则"没播完就重播"✗）
+					return;
+				}
 				CloudDiscClient.LOGGER.info("[CloudDisc] 已播到真实结尾（{}ms）→ 结束播放", realEnd);
 				stopQuiet(s);
 				announcer.announceStop(s, nowTick);
@@ -525,11 +555,32 @@ public final class PlaybackController {
 		long dur = pipe.durationMs();
 		long contentNow = s.msAtStart + (nowTick - s.startedTick) * 50L;
 		if (dur > 0L && s.startedTick > 0L && contentNow > dur + 500L) {
+			if (cfg.loopSingle) {
+				// 【26.2】循环已交给解码管线内部 ✓ 这里不再重开声音实例 ✗（否则"没播完就重播"✗）
+			} else {
+				stopQuiet(s);
+				announcer.announceStop(s, nowTick);
+			}
+		}
+	}
+
+	/**
+	 * 【单曲循环】把当前会话退回 0 秒继续播放（无缝重播）。
+	 * <p>做法：向音频管线请求 seek 到 0 ✓ 并把会话的时间基准重置到"现在"✓
+	 * 与原版唱片机的区别：原版放完会停；我们这里按配置 loopSingle 决定是否循环。
+	 */
+	private void loopBack(JukeboxSession s, long nowTick, long realEnd) {
+		try {
+			s.msAtStart = 0L;
+			s.startedTick = nowTick;
+			s.pipeline.requestSeek(0L);
+			CloudDiscClient.LOGGER.info("[CloudDisc] 单曲循环：已回到开头（本轮时长 {}ms）", realEnd);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 单曲循环重播失败，改为停止: {}", t.toString());
 			stopQuiet(s);
 			announcer.announceStop(s, nowTick);
 		}
 	}
-
 	// ------------------------------------------------------------ 内部流程
 
 	private void startSession(JukeboxSession s, long nowTick) {
@@ -548,7 +599,7 @@ public final class PlaybackController {
 		}
 		CloudDiscClient.LOGGER.info("[CloudDisc] 开始解析曲目: provider={} trackId={}", provider.id(), s.trackId);
 		provider.resolve(s.trackId, cfg).whenComplete((track, err) ->
-				MinecraftClient.getInstance().execute(() -> {
+				Minecraft.getInstance().execute(() -> {
 					if (err != null || track == null) {
 						pending.remove(s.key);
 						CloudDiscClient.LOGGER.warn("[CloudDisc] 解析失败 {}:{} -> {}", s.provider, s.trackId, String.valueOf(err));
@@ -595,7 +646,7 @@ public final class PlaybackController {
 	 * 各自 {@code play()}，全程不做任何进度纠偏）。
 	 */
 	private void beginPrepare(JukeboxSession s, boolean announceAfterReady) {
-		final String uri = resolveUriForThisClient(s);
+		final String uri = resolveUriForThisClientSide(s);
 		if (uri == null || uri.isBlank()) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 会话没有可用 uri（可能来自不携带 URI 的通道）: {}", s.title);
 			stopQuiet(s);
@@ -613,6 +664,10 @@ public final class PlaybackController {
 			CloudDiscClient.LOGGER.info("[CloudDisc] 已就绪: {}（{} Hz / {} 声道 / 时长 {}ms）",
 					file.getFileName(), source.sampleRate(), source.channels(), source.durationMillis());
 			AudioPipeline pipe = new AudioPipeline(source, cfg.outputGain);
+		// 26.2 把重新打开音源的能力交给管线，单曲循环靠它实现
+		final Path loopFileRef = file;
+		pipe.setSourceFactory(() -> openSource(loopFileRef));
+		// 26.2 把重新打开音源的能力交给管线，单曲循环靠它实现（不用 seek）
 			// 先把"开头"预缓冲好。正常情况（大家都按时准备好）开声时是零延迟的。
 			boolean ok = pipe.awaitPrebuffer(cfg.prebufferMs, 15_000L);
 			if (!ok) {
@@ -620,7 +675,7 @@ public final class PlaybackController {
 						pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
 			}
 			return pipe;
-		}, WORKER).whenComplete((pipe, err) -> MinecraftClient.getInstance().execute(() -> {
+		}, WORKER).whenComplete((pipe, err) -> Minecraft.getInstance().execute(() -> {
 			if (s.state == JukeboxSession.State.DEAD) {
 				if (pipe != null) {
 					pipe.close();
@@ -687,7 +742,7 @@ public final class PlaybackController {
 			}
 			pipe.awaitPrebuffer(cfg.prebufferMs, 15_000L);
 			return pos;
-		}, WORKER).whenComplete((pos, err) -> MinecraftClient.getInstance().execute(() -> {
+		}, WORKER).whenComplete((pos, err) -> Minecraft.getInstance().execute(() -> {
 			if (s.state == JukeboxSession.State.DEAD || pos == null) {
 				return;
 			}
@@ -714,28 +769,97 @@ public final class PlaybackController {
 		// 这两种情况下原版已经响了，而我们随后接上 = **两条音轨同时出声**。
 		// playSong(null, pos) 是原版自己的停止路径：从 playingSongs 摘掉 + SoundManager.stop。
 		try {
-			MinecraftClient.getInstance().worldRenderer.playSong(null, s.pos());
+			/* [26.2] worldRenderer.playSong 已移除（JukeboxSongPlayer 体系） */;
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.debug("[CloudDisc] 停原版唱片实例失败（不影响我们播放）: {}", t.toString());
 		}
 		Identifier streamId = StreamRegistry.nextId();
 		PcmAudioStream stream = new PcmAudioStream(pipe.ring(), 150L, pipe::close);
+			// 【单曲循环】读到真实结尾时由管线重开音源 ✓（配置 loopSingle 控制 ✓）
+			stream.setRestartOnEof(() -> cfg.loopSingle && pipe.restartForLoop());
+			stream.setEndReached(pipe::reachedEnd);   // 解码已到底 ⇒ 欠载时就触发重开 ✓
 		StreamRegistry.put(streamId, stream);
 		CloudDiscSoundInstance instance = new CloudDiscSoundInstance(streamId, s.pos(), cfg.jukeboxVolume);
 		s.streamId = streamId;
 		s.stream = stream;
 		s.instance = instance;
 		s.startedTick = now();
-		s.msAtStart = positionMs;
+		// ===== 【26.2 修复 · 后进来的玩家听不见】=====
+		// 场景：发起方 wanpi 放歌并已循环过一轮，123 才进来 ✗
+		//   → 同步算出"应从第 178 秒开始"✗ = 第一轮末尾 ✗
+		//   → 我们的是【流式 MP3 解码】✗ 不能真跳转 ✗ seek 之后没有数据 ✗
+		//   → 实测：预缓冲只有 26ms ✗（正常 4000+ms ✓）→ 完全听不见 ✗
+		// 处理：晚进来的（位置 > 3 秒）一律【从整首开头播】✓ 保证一定出声 ✓
+		//   —— 之后每个客户端各自按自己的管线循环 ✗ 相位差会逐步体现 ✓
+		//      （要精确对齐需要能随机访问的音源 ✗ 当前流式方案做不到 ✓ 这里优先"听得到"✓）
+		// ===== 26.2 真同步（外科手术版）：先跳转到位、再等预缓冲，然后才开声 =====
+		// 我们的是流式 MP3 ✗ 不能随机访问 ✗ 但解码器支持"边解码边丢弃到目标位置"✓
+		// 端点：requestSeekBlocking(ms, timeout) ✓（同步等待，返回是否到位 ✓）
+		// 为什么以前听不见 ✗：seek 是异步的 ✗ 没等缓冲填起来就 play ✗
+		//   实测"请求 178150ms / 实际 178150ms"但【预缓冲仅 26ms】✗ → 完全没声音 ✗
+		// 这里：① 阻塞 seek（最多 1.2 秒 ✓ 避免冻住渲染线程 ✗）
+		//       ② 再等缓冲攒到 1.2 秒（最多再等 0.8 秒 ✓）
+		//       ③ 无论是否完全就绪都【照常开声】✓（超时就边放边补 ✓ 绝不静音 ✗）
+		long targetMs = Math.max(0L, positionMs);
+		// 【单曲循环 · 相位】发起方可能已经循环过若干轮 ⇒ 它给的"已播毫秒"会大于歌曲时长 ✓
+		// 这时要对时长取模，跟随端才会落在【同一个相位】上（验收标准第四条 ✓）
+		{
+			long durForPhase = s.durationMs > 0L ? s.durationMs : pipe.durationMs();
+			if (durForPhase > 1000L && targetMs >= durForPhase) {
+				long phased = targetMs % durForPhase;
+				CloudDiscClient.LOGGER.info("[CloudDisc] 循环相位对齐: 收到 {}ms，取模到 {}ms（时长 {}ms）", targetMs, phased, durForPhase);
+				targetMs = phased;
+			}
+		}
+		boolean seeked = false;
+		try {
+			if (targetMs <= 0L) {
+				// 【26.2 修复 · 开头缺一点】目标就是 0 秒 ✗ 千万别去 seek ✗
+				// 原因：jlayer 的 seek 路径会跳过第一帧（实测：开头少一点 ✗）
+				// 直接让解码器从头顺序解码 ✓ 第一帧不会丢 ✓
+				seeked = true;
+			} else {
+				try {
+					seeked = pipe.requestSeekBlocking(targetMs, 1_200L);
+				} catch (Throwable t) {
+					CloudDiscClient.LOGGER.warn("[CloudDisc] 跳转异常: {}", t.toString());
+				}
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 跳转异常: {}", t.toString());
+		}
+		long wantBytes = 2_500L * AudioPipeline.BYTES_PER_MS;
+		long deadline = System.nanoTime() + 1_500_000_000L;
+		while (pipe.ring().available() < wantBytes && System.nanoTime() < deadline) {
+			try {
+				Thread.sleep(15L);
+			} catch (InterruptedException ie) {
+				Thread.currentThread().interrupt();
+				break;
+			}
+		}
+		CloudDiscClient.LOGGER.info("[CloudDisc] 真同步就绪: 目标 {}ms → 预缓冲 {}ms（跳转 {}）",
+				targetMs, pipe.ring().available() / AudioPipeline.BYTES_PER_MS, seeked ? "成功" : "超时");
+		s.msAtStart = targetMs;
 		// 交给原版声音系统：定位、音量类别、停止逻辑全部沿用原版
-		MinecraftClient.getInstance().getSoundManager().play(instance);
+		// 【诊断】开声瞬间的快照：用于定位"开头几秒被掐"
+		try {
+			CloudDiscClient.LOGGER.info("[CloudDisc] 开声快照: 目标位置={}ms 期望播放位置={}ms 缓冲={}ms 引擎已消费={}ms loopForever={}",
+					targetMs, s.msAtStart,
+					pipe.ring().available() / AudioPipeline.BYTES_PER_MS,
+					pipe.playedMs(),
+					pipe.isLoopForever());
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 开声快照失败: {}", t.toString());
+		}
+		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
-		// 还原原版行为：屏幕下方显示"正在播放: xxx"。
-		// 原版这一句在 WorldRenderer#playSong 里 —— inGameHud.setRecordPlayingOverlay(item.getDescription())；
-		// 我们为了不发出原版声音会取消 1010 事件，顺带把它一起丢掉了。这里按原版的方式补回来：
-		// 同一个方法、同一个时机（真正开声的那一刻），所以观感与原版一致（淡出也由 HUD 自己管）。
-		MinecraftClient.getInstance().inGameHud.setRecordPlayingOverlay(
-				net.minecraft.text.Text.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
+		// 还原原版行为：屏幕下方显示「正在播放: xxx」（26.2 里是 Minecraft.gui.setNowPlaying(Component) ✓）
+		// 【26.2】告诉解码管线：这张碟要不要单曲循环（管线内部循环 ✗ 不让流到 EOF ✓）
+				if (pipe != null) { pipe.setLoopForever(cfg.loopSingle); }
+
+		Minecraft.getInstance().gui.hud.setNowPlaying(
+				Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
 				s.title, positionMs, pipe.playedMs(), streamId, pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
@@ -751,7 +875,7 @@ public final class PlaybackController {
 	 * <p>http(s) 的 URI 直接沿用：网易云这类在线音源不需要对端配置任何东西（这正是
 	 * "只有发起方需要配置音源"的设计收益）。
 	 */
-	private String resolveUriForThisClient(JukeboxSession s) {
+	private String resolveUriForThisClientSide(JukeboxSession s) {
 		String uri = s.uri;
 		if (s.originator) {
 			return uri;
@@ -797,13 +921,13 @@ public final class PlaybackController {
 				if (head[0] == 'f' && head[1] == 'L' && head[2] == 'a' && head[3] == 'C') {
 					return "flac";
 				}
-				if (head[0] == 'I' && head[1] == 'D' && head[2] == '3') {
+				if (head[0] == 'd' && head[1] == 'D' && head[2] == '3') {
 					return "mp3"; // 带 ID3v2 标签
 				}
 				if ((head[0] & 0xFF) == 0xFF && (head[1] & 0xE0) == 0xE0) {
 					return "mp3"; // 裸 MPEG 帧同步字
 				}
-				if (head.length >= 12 && head[0] == 'R' && head[1] == 'I' && head[2] == 'F' && head[3] == 'F'
+				if (head.length >= 12 && head[0] == 'e' && head[1] == 'd' && head[2] == 'F' && head[3] == 'F'
 						&& head[8] == 'W' && head[9] == 'A' && head[10] == 'V' && head[11] == 'E') {
 					return "wav";
 				}
@@ -852,27 +976,50 @@ public final class PlaybackController {
 
 	/** 等待窗口内没人认领 → 把原版唱片声补上（会晚一点点，但总比一直静音好）。 */
 	private void fallbackVanilla(Held h) {
-		MinecraftClient mc = MinecraftClient.getInstance();
-		ClientWorld world = mc.world;
-		if (world == null || !world.getRegistryKey().getValue().toString().equals(h.dim)) {
+		// 【26.2 恢复】没人认领时，按原版方式把这张【原版唱片】放出来。
+		// 1.20.1 用的是 WorldRenderer#playSong(disc.getSound(), pos) ✗ 26.2 已移除 ✗
+		// 26.2 的等价做法：从方块实体取 JukeboxSong → 用它的 soundEvent 本地播一发 ✓
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) {
 			return;
 		}
-		Item item = Item.byRawId(h.itemId);
-		if (!(item instanceof MusicDiscItem disc)) {
+		BlockPos pos = h.pos;
+		if (!(mc.level.getBlockEntity(pos) instanceof net.minecraft.world.level.block.entity.JukeboxBlockEntity jb)) {
 			return;
 		}
-		// 关键：走**原版自己的入口** WorldRenderer#playSong，而不是 world.playSound。
-		// 差别很大：
-		//   · playSong 会把它登记进 playingSongs（原版记账表）→ 之后能被原版/我们停掉、
-		//     HUD 会显示曲名、鹦鹉会跳舞；
-		//   · 以前用 world.playSound 放的是"野生声音"，没有任何人能停它 ——
-		//     等我们这边真接上时，就变成**两条音轨同时响**（实测 bug：有时候会卡出原版的音乐）。
-		mc.worldRenderer.playSong(disc.getSound(), h.pos);
-		CloudDiscClient.LOGGER.debug("[CloudDisc] 无人认领，回落原版唱片声 @ {}（走原版 playSong，可被接管时停掉）", h.pos);
+		try {
+			var song = jb.getSongPlayer().getSong();
+			if (song == null) {
+				return;
+			}
+			var holder = song.soundEvent();
+			if (holder == null || holder.value() == null) {
+				return;
+			}
+			// 与唱片机完全一致：RECORDS 类别 + 4.0 音量 + 1.0 音高 ✓
+			mc.level.playLocalSound(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+					holder.value(), net.minecraft.sounds.SoundSource.RECORDS, 4.0f, 1.0f, false);
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 无人认领 → 按原版播放唱片声 @ {}", pos);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 原版唱片回落失败（不影响其它功能）: {}", t.toString());
+		}
 	}
 
 	private void stopQuiet(JukeboxSession s) {
+		dev.clouddisc.easteregg.JellyEffect.deactivate();   // 停止即消失 ✓
 		sessions.remove(s.key);
+		// ===== 【26.2 修复 · 到结尾卡住 / 反复播最后一点】=====
+		// 只让流结束是不够的 ✗（日志实测：流结束后「引擎已消费 7627ms，缓冲积压 0ms」✗
+		//  MC 的 Channel 在没数据可放时会卡住并反复播最后那点缓冲 ✗ = 听到的「卡住 / 一秒循环」✗）
+		// 正确做法：主动把这条声音实例从声音系统里停掉 ✓ 引擎随后正常回收 OpenAL 源 ✓
+		try {
+			if (s.instance != null) {
+				Minecraft.getInstance().getSoundManager().stop(s.instance);
+				CloudDiscClient.LOGGER.info("[CloudDisc] 已主动停止声音实例（不再依赖流结束）");
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.debug("[CloudDisc] 主动停止声音实例失败（忽略）: {}", t.toString());
+		}
 		s.dispose();
 	}
 

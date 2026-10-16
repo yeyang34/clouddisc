@@ -30,7 +30,7 @@ import java.nio.IntBuffer;
  *
  * <p><b>安全阀</b>：任何异常 / 返回 0，都立刻退回"原样调用"，绝不让声音引擎起不来。
  */
-@Mixin(net.minecraft.client.sound.SoundEngine.class)
+@Mixin(net.minecraft.client.sounds.SoundEngine.class)
 public class SoundEngineMixin {
 	@Redirect(method = "init", at = @At(value = "INVOKE",
 			target = "Lorg/lwjgl/openal/ALC10;alcCreateContext(JLjava/nio/IntBuffer;)J"))
