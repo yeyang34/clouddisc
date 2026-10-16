@@ -28,6 +28,23 @@ public final class PcmAudioStream implements AudioStream {
 	private boolean closed;
 	/** 循环用：读到真实结尾时调它重开解码器 ✓（返回 false 表示无法循环 ⇒ 按原版契约结束 ✓） */
 	private java.util.function.BooleanSupplier restartOnEof;
+	/** 循环垫静音的计数（每段 20ms ✓ 上限约 2 秒 ✓ 超过就认定重开失败 ✓） */
+	private static final int MAX_SILENCE_PADS = 100;
+	private int silencePads = 0;
+	private boolean restartPending = false;
+
+	/** 只为把日志收敛成一行 ✓ 避免刷屏 ✓ */
+	private static final class RestartLogger {
+		private static long last = 0L;
+
+		static void log() {
+			long now = System.currentTimeMillis();
+			if (now - last > 1000L) {
+				last = now;
+				dev.clouddisc.CloudDiscClient.LOGGER.info("[CloudDisc] 单曲循环: 已请求重开音源 ✓ 正在垫静音等待数据 ✓");
+			}
+		}
+	}
 
 	public void setRestartOnEof(java.util.function.BooleanSupplier s) { this.restartOnEof = s; }
 
@@ -51,33 +68,44 @@ public final class PcmAudioStream implements AudioStream {
 		int n = ring.read(scratch, 0, size, timeoutMs);
 		direct.clear();
 		if (n < 0) {
-			// 【单曲循环】读到真实结尾：重开解码器 ✓ 然后继续吐数据 ✓
-			// 读不到就按原版契约返回 null（= 流真正结束 ✓ 引擎会正常收尾 ✓）
+			// 【单曲循环 · 绝不阻塞】这一段跑在【声音引擎线程】上 ✗
+			// 实测：在这里等待（最多 12 秒）会让整个游戏卡住 ✗✗
+			// 正确做法：只【踢一下】重开（瞬间返回 ✓）然后送回一小段静音 ✓
+			//   ⇒ 引擎把静音当数据 ✓ 下一轮还会来取 ✓ 那时解码器已经补上真数据 ✓
+			//   ⇒ 连续垫静音超过上限（约 2 秒）说明重开真的失败 ⇒ 按原版契约结束 ✓
 			java.util.function.BooleanSupplier r = restartOnEof;
-			if (r != null) {
-				for (int attempt = 0; attempt < 40; attempt++) {
-					boolean ok;
+			if (r != null && silencePads < MAX_SILENCE_PADS) {
+				boolean justRestarted = false;
+				if (!restartPending) {
 					try {
-						ok = r.getAsBoolean();
+						restartPending = r.getAsBoolean();
 					} catch (Throwable t) {
-						ok = false;
+						restartPending = false;
 					}
-					if (!ok) {
-						break;
-					}
-					int m = ring.read(scratch, 0, size, 250L);
+					justRestarted = restartPending;
+				}
+				if (restartPending) {
+					// 先试一把非阻塞读（可能已经补上了 ✓）
+					int m = ring.read(scratch, 0, size, 0L);
 					if (m > 0) {
+						restartPending = false;
+						silencePads = 0;
 						direct.clear();
 						direct.put(scratch, 0, m);
 						direct.flip();
 						return direct;
 					}
-					try {
-						Thread.sleep(50L);
-					} catch (InterruptedException ie) {
-						Thread.currentThread().interrupt();
-						break;
+					if (justRestarted) {
+						RestartLogger.log();
 					}
+					// 垫 20ms 静音 ✓（= 1920 字节 @48k/16bit/mono ✓ 取 size 与 1920 的较小值 ✓）
+					silencePads++;
+					int pad = Math.min(size, 1920);
+					java.util.Arrays.fill(scratch, 0, pad, (byte) 0);
+					direct.clear();
+					direct.put(scratch, 0, pad);
+					direct.flip();
+					return direct;
 				}
 			}
 			return null;   // 无法循环 ⇒ 真正结束 ✓
