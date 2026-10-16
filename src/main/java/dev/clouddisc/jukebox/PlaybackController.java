@@ -781,6 +781,16 @@ public final class PlaybackController {
 		//       ② 再等缓冲攒到 1.2 秒（最多再等 0.8 秒 ✓）
 		//       ③ 无论是否完全就绪都【照常开声】✓（超时就边放边补 ✓ 绝不静音 ✗）
 		long targetMs = Math.max(0L, positionMs);
+		// 【单曲循环 · 相位】发起方可能已经循环过若干轮 ⇒ 它给的"已播毫秒"会大于歌曲时长 ✓
+		// 这时要对时长取模，跟随端才会落在【同一个相位】上（验收标准第四条 ✓）
+		{
+			long durForPhase = s.durationMs > 0L ? s.durationMs : pipe.durationMs();
+			if (durForPhase > 1000L && targetMs >= durForPhase) {
+				long phased = targetMs % durForPhase;
+				CloudDiscClient.LOGGER.info("[CloudDisc] 循环相位对齐: 收到 {}ms，取模到 {}ms（时长 {}ms）", targetMs, phased, durForPhase);
+				targetMs = phased;
+			}
+		}
 		boolean seeked = false;
 		try {
 			if (targetMs <= 0L) {
