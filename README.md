@@ -18,7 +18,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `clouddisc-x.y.z.jar` | 主 mod（必需） |
-| `clouddisc-jukeboxlib-*.jar` | 可选：解除唱片时长限制，想放整首歌就装它 |
+| ~~clouddisc-jukeboxlib~~ | 已并入主 mod：解除唱片时长限制现在是内置的，**不用**再单独装它 |
 
 ## 特色
 
