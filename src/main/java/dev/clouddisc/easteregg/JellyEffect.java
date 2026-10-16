@@ -30,6 +30,17 @@ public final class JellyEffect {
 	/** 触发彩蛋的歌曲 id（唱片名写 @3438848556 ✓）。 */
 	public static final String TRIGGER_TRACK_ID = "3438848556";
 
+	/**
+	 * 【卡点 BPM】这首歌的节拍数（每分钟拍数 ✓）。
+	 * 果冻的收缩/弹跳/旋转都按【整拍】走 ✓ 这样才会"卡上点"✓。
+	 * 采集方式：把 bpm-track.mp3 丢进任意 BPM 工具（或手打拍子 ✓）读一个数 ✓ 填这里即可 ✓。
+	 * 填 0 = 不卡点（用原来的自由节奏 ✓）。
+	 */
+	public static final double BPM = 128.0;
+
+	/** 歌曲起始偏移（毫秒 ✓）：若第一拍不在 0 秒，把它填进来 ✓ 卡点会更准 ✓。 */
+	public static final double BEAT_OFFSET_MS = 0.0;
+
 	private static volatile boolean active = false;
 	private static volatile double centerX;
 	private static volatile double centerY;
@@ -81,15 +92,25 @@ public final class JellyEffect {
 		if (!active) {
 			return;
 		}
-		// 用【渲染状态的 ageInTicks】做时间轴 ✓（每帧单调推进 ✓ 比 nanoTime 平滑得多 ✗ 之前卡就是这个原因 ✓）
-		double t = ageInTicks * 0.05 + (entityId % 20) * 0.13;
-		// 果冻伸缩：0.55 ~ 1.55 ✓ 力度加大（原来 ±0.35 太温柔 ✗）
-		double wave = Math.sin(t * 2.6);
+		// 时间轴：渲染状态的 ageInTicks（每秒 20 刻 ✓ 每帧单调推进 ✓ 顺滑 ✓）
+		double seconds = ageInTicks / 20.0;
+		// 【卡点】把时间换算成"拍"：beat = (秒 - 起始偏移) × BPM / 60 ✓
+		double beat;
+		if (BPM > 1.0) {
+			beat = (seconds - BEAT_OFFSET_MS / 1000.0) * BPM / 60.0;
+		} else {
+			beat = seconds * 1.6;   // 没填 BPM 时的自由节奏 ✓
+		}
+		// 每只生物错开一点相位（按位置哈希 ✓）
+		double phaseOffset = (entityId % 20) * 0.03;
+		double b = beat + phaseOffset;
+		// 用"拍"驱动：一拍一个完整的拉伸-回弹循环 ✓（sin 的整数周期正好落在拍点上 ✓）
+		double wave = Math.sin(b * Math.PI * 2.0);
 		double sy = 1.0 + 0.55 * wave;
 		double sxz = 1.0 - 0.30 * wave;
 		float bounce = (float) Math.max(0.0, 0.22 * wave);
-		// 旋转：每 1.0 秒一圈 ✓（用同一个时基 ✓ 旋转也就顺了 ✓）
-		float angle = (float) ((t * 0.5) % (Math.PI * 2.0));
+		// 旋转：两拍一圈 ✓（也是整数倍 ⇒ 每拍都在同一朝向 ✓ 更"卡点"✓）
+		float angle = (float) ((b * Math.PI) % (Math.PI * 2.0));
 		float pivotY = Math.max(0.1f, height * 0.5f);
 
 		pose.translate(0.0f, bounce, 0.0f);
