@@ -26,6 +26,10 @@ public final class PcmAudioStream implements AudioStream {
 	private ByteBuffer direct;
 	private byte[] scratch;
 	private boolean closed;
+	/** 循环用：读到真实结尾时调它重开解码器 ✓（返回 false 表示无法循环 ⇒ 按原版契约结束 ✓） */
+	private java.util.function.BooleanSupplier restartOnEof;
+
+	public void setRestartOnEof(java.util.function.BooleanSupplier s) { this.restartOnEof = s; }
 
 	public PcmAudioStream(PcmRingBuffer ring, long timeoutMs, Runnable onClose) {
 		this.ring = ring;
@@ -47,9 +51,36 @@ public final class PcmAudioStream implements AudioStream {
 		int n = ring.read(scratch, 0, size, timeoutMs);
 		direct.clear();
 		if (n < 0) {
-			// 真 EOF：按原版契约返回 null = 这一段/这条流结束 ✓
-			// （返回空缓冲 ✗ 会让 OpenAL 反复播上一个缓冲 ⇒ 听感是"播一会自己跳回开头"✗ 实测踩过 ✓）
-			return null;
+			// 【单曲循环】读到真实结尾：重开解码器 ✓ 然后继续吐数据 ✓
+			// 读不到就按原版契约返回 null（= 流真正结束 ✓ 引擎会正常收尾 ✓）
+			java.util.function.BooleanSupplier r = restartOnEof;
+			if (r != null) {
+				for (int attempt = 0; attempt < 40; attempt++) {
+					boolean ok;
+					try {
+						ok = r.getAsBoolean();
+					} catch (Throwable t) {
+						ok = false;
+					}
+					if (!ok) {
+						break;
+					}
+					int m = ring.read(scratch, 0, size, 250L);
+					if (m > 0) {
+						direct.clear();
+						direct.put(scratch, 0, m);
+						direct.flip();
+						return direct;
+					}
+					try {
+						Thread.sleep(50L);
+					} catch (InterruptedException ie) {
+						Thread.currentThread().interrupt();
+						break;
+					}
+				}
+			}
+			return null;   // 无法循环 ⇒ 真正结束 ✓
 		}
 		if (n == 0) {
 			// 欠载：返回 null —— 1.20.1 的 Channel.pumpBuffers 会安全跳过这一轮，

@@ -755,6 +755,8 @@ public final class PlaybackController {
 		}
 		Identifier streamId = StreamRegistry.nextId();
 		PcmAudioStream stream = new PcmAudioStream(pipe.ring(), 150L, pipe::close);
+			// 【单曲循环】读到真实结尾时由管线重开音源 ✓（配置 loopSingle 控制 ✓）
+			stream.setRestartOnEof(() -> cfg.loopSingle && pipe.restartForLoop());
 		StreamRegistry.put(streamId, stream);
 		CloudDiscSoundInstance instance = new CloudDiscSoundInstance(streamId, s.pos(), cfg.jukeboxVolume);
 		s.streamId = streamId;

@@ -82,6 +82,39 @@ public final class AudioPipeline implements AutoCloseable {
 		return peak;
 	}
 
+	/**
+	 * 【单曲循环】读取到真实结尾时重开音源 ✓
+	 * 为什么不用 seek ✗：实测 seekSample(0) 之后位置回不到 0 ✗ 会空转且只剩一秒 ✓
+	 * 做法：用工厂新建一个音源 ✓ 关掉旧的 ✓ 再让解码线程从 0 帧重新开始 ✓
+	 * @return 是否成功重开
+	 */
+	public boolean restartForLoop() {
+		java.util.function.Supplier<PcmSource> f = this.sourceFactory;
+		if (f == null) {
+			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开失败: 没有音源工厂");
+			return false;
+		}
+		PcmSource fresh = null;
+		try {
+			fresh = f.get();
+		} catch (Throwable t) {
+			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开音源异常: {}", t.toString());
+		}
+		if (fresh == null) {
+			return false;
+		}
+		try {
+			this.source.close();
+		} catch (Throwable ignored) {
+		}
+		this.source = fresh;
+		// 强制让解码线程执行一次 seek(0)：把已应用位置置成不可能值 ✓
+		this.appliedSeekMs = Long.MIN_VALUE;
+		this.requestSeek(0L);
+		CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环: 已重开音源并从 0 继续播放 ✓");
+		return true;
+	}
+
 	public PcmRingBuffer ring() {
 		return ring;
 	}
