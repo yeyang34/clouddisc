@@ -235,6 +235,8 @@ public final class PlaybackController {
 		}
 
 		if (eventId == 1011) {
+			// 【诊断 · 拔碟卡顿】分段计时 ✓ 下次日志就能看出卡在哪一步 ✓
+			final long __t0 = System.nanoTime();
 			// 【0.9.0 起的行为】原版怎么通知，我们就怎么停 —— 干净、可预期：
 			//   · 自然放完（到唱片标称时长）→ 停
 			//   · 玩家拔碟 / 换碟             → 停（换碟随后会有新的 1010 接管）
@@ -243,11 +245,16 @@ public final class PlaybackController {
 			// 这样音乐 mod 自己永远不需要猜"这次 1011 是哪种"，也就不会出现
 			// "停不下来 / 换不了碟"那种别扭行为。
 			JukeboxSession live = sessions.remove(key);
+			final long __t1 = System.nanoTime();
 			CloudDiscClient.LOGGER.info("[CloudDisc] 收到世界事件 1011（唱片机停止/取出唱片）@ {}｜本机有会话={}", pos, live != null);
 			if (live != null) {
 				live.dispose();
+				final long __t2 = System.nanoTime();
 				dev.clouddisc.easteregg.JellyEffect.deactivate();   // 拔碟/换碟 ⇒ 彩蛋立刻消失 ✓
 				announcer.announceStop(live, nowTick);
+				final long __t3 = System.nanoTime();
+				CloudDiscClient.LOGGER.info("[CloudDisc] 拔碟耗时: 取会话 {}ms / dispose {}ms / 广播 {}ms / 合计 {}ms",
+						(__t1 - __t0) / 1000000L, (__t2 - __t1) / 1000000L, (__t3 - __t2) / 1000000L, (__t3 - __t0) / 1000000L);
 				return Decision.CANCEL;
 			}
 			holds.remove(key);
