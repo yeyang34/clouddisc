@@ -92,7 +92,15 @@ public final class AudioPipeline implements AutoCloseable {
 	 * 做法：用工厂新建一个音源 ✓ 关掉旧的 ✓ 再让解码线程从 0 帧重新开始 ✓
 	 * @return 是否成功重开
 	 */
+	/** 本次"到底"是否已经重开过音源 ✓（避免流端反复重踢时反复关/开音源 ✗ 那会让解码线程踩空 ⇒ 结束流 ✗） */
+	private volatile boolean reopenedForThisEnd = false;
+
 	public boolean restartForLoop() {
+		if (this.reopenedForThisEnd) {
+			// 已经重开过一次了 ✓ 只补发 seek 请求（幂等 ✓ 不碰音源 ✓）
+			this.requestSeek(0L);
+			return true;
+		}
 		java.util.function.Supplier<PcmSource> f = this.sourceFactory;
 		if (f == null) {
 			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开失败: 没有音源工厂");
@@ -112,6 +120,7 @@ public final class AudioPipeline implements AutoCloseable {
 		} catch (Throwable ignored) {
 		}
 		this.source = fresh;
+		this.reopenedForThisEnd = true;   // 标记：本次到底已重开 ✓
 		// ① 复位环形缓冲：EOF 时 finish() 把 finished 置成了 true ✗
 		//    不复位的话 write() 会直接丢弃 ✓ read() 永远返回 -1 ✗（实测就是这样 ✗）
 		this.ring.restart();
@@ -219,6 +228,7 @@ public final class AudioPipeline implements AutoCloseable {
 					ring.clear();
 					writtenBytes.set(BYTES_PER_MS * seek);
 					appliedSeekMs = seek;
+					this.reopenedForThisEnd = false;   // 新一轮开始 ✓ 允许下次到底时再重开 ✓
 					this.reachedEnd = false;   // 已重新开始解码 ✓ 清信号 ✓
 					synchronized (this) {
 						notifyAll();
