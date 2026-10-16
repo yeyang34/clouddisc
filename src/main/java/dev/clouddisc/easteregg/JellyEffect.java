@@ -102,13 +102,13 @@ public final class JellyEffect {
 			beat = seconds * 1.6;   // 没填 BPM 时的自由节奏 ✓
 		}
 		// 每只生物错开一点相位（按位置哈希 ✓）
-		double phaseOffset = (entityId % 20) * 0.03;
-		double b = beat + phaseOffset;
+		double phaseOffset = 0.0;   // 【修正】不再用位置哈希做相位 ✗（生物一走哈希就变 ⇒ 忽快忽慢 ✓）⇒ 全体同步 ✓
+		double b = beat + phaseOffset;   // = beat ✓ 全体同拍 ✓
 		// 用"拍"驱动：一拍一个完整的拉伸-回弹循环 ✓（sin 的整数周期正好落在拍点上 ✓）
 		double wave = Math.cos(b * Math.PI * 2.0);   // 用 cos ✓ ⇒ 每一拍正好是"最大拉伸"✓（sin 会晚四分之一拍 ✗ 不卡点 ✗）
-		double sy = 1.0 + 0.55 * wave;
-		double sxz = 1.0 - 0.30 * wave;
-		float bounce = (float) Math.max(0.0, 0.22 * wave);
+		double sy = 1.0 + 0.30 * wave;   // 力度调小（0.55 太夸张 ✗）
+		double sxz = 1.0 - 0.16 * wave;
+		float bounce = (float) Math.max(0.0, 0.12 * wave);
 		// 旋转：两拍一圈 ✓（也是整数倍 ⇒ 每拍都在同一朝向 ✓ 更"卡点"✓）
 		float angle = (float) ((b * Math.PI * 2.0) % (Math.PI * 2.0));   // 一拍一圈 ✓（原来两拍一圈太慢 ✗）
 		float pivotY = Math.max(0.1f, height * 0.5f);
