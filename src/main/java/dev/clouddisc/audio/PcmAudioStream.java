@@ -29,7 +29,7 @@ public final class PcmAudioStream implements AudioStream {
 	/** 循环用：读到真实结尾时调它重开解码器 ✓（返回 false 表示无法循环 ⇒ 按原版契约结束 ✓） */
 	private java.util.function.BooleanSupplier restartOnEof;
 	/** 循环垫静音的计数（每段 20ms ✓ 上限约 2 秒 ✓ 超过就认定重开失败 ✓） */
-	private static final int MAX_SILENCE_PADS = 400;   // 400 × 20ms ≈ 8 秒 ✓ 足够解码器重启 ✓
+	private static final int MAX_SILENCE_PADS = 50;   // 50 × 20ms = 1 秒 ✓ 超过就当重开失败 ✓
 	private int silencePads = 0;
 	private boolean restartPending = false;
 
@@ -122,7 +122,7 @@ public final class PcmAudioStream implements AudioStream {
 			// 【循环触发点】环形缓冲欠载，且解码线程已读到文件尾 ⇒ 就是"该重开了"✓
 			// 这里绝不再干等（那会卡住声音引擎线程 ✗）—— 只踢一下重开 + 垫 20ms 静音 ✓
 			boolean justRestarted2 = false;
-			if (!restartPending) {
+			if (!restartPending || silencePads % 25 == 0) {   // 每 0.5 秒再踢一次 ✓ 幂等 ✓
 				try {
 					restartPending = restartOnEof.getAsBoolean();
 				} catch (Throwable t) {
