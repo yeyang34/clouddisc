@@ -28,7 +28,16 @@ dependencies {
 
 	// ModMenu 的模组列表入口（仅编译期需要；运行期没装 ModMenu 也不会加载那个类）
 	// ModMenu 只做编译期依赖：直接用本机 26.2 实例里那一份 jar ✓（不打进产物 ✓）
-	compileOnly files("D:/.minecraft/versions/26.2-Fabric 0.19.5/mods/[模组菜单] modmenu-20.0.3.jar")
+	// ModMenu 只做编译期依赖：
+	//   · 本机有 26.2 实例里那份 jar ⇒ 直接用本地（最快 ✓）
+	//   · 没有（例如 GitHub Actions 的 ubuntu runner ✗）⇒ 退回 TerraformersMC 仓库 ✓
+	// 之前写死本地 Windows 绝对路径 ⇒ CI 上找不到文件 ⇒ 构建必然失败 ✓（失败邮件就是它 ✓）
+	def modmenuLocal = file("D:/.minecraft/versions/26.2-Fabric 0.19.5/mods/[模组菜单] modmenu-20.0.3.jar")
+	if (modmenuLocal.exists()) {
+		compileOnly files(modmenuLocal)
+	} else {
+		compileOnly "com.terraformersmc:modmenu:20.0.3"
+	}
 
 	// MP3 解码（LGPL-2.1，见 THIRD-PARTY.md）。
 	// 用 Loom 的 include 打成嵌套 jar（META-INF/jars/），不打进主 classpath，
