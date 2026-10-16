@@ -29,7 +29,7 @@ public final class PcmAudioStream implements AudioStream {
 	/** 循环用：读到真实结尾时调它重开解码器 ✓（返回 false 表示无法循环 ⇒ 按原版契约结束 ✓） */
 	private java.util.function.BooleanSupplier restartOnEof;
 	/** 循环垫静音的计数（每段 20ms ✓ 上限约 2 秒 ✓ 超过就认定重开失败 ✓） */
-	private static final int MAX_SILENCE_PADS = 100;
+	private static final int MAX_SILENCE_PADS = 400;   // 400 × 20ms ≈ 8 秒 ✓ 足够解码器重启 ✓
 	private int silencePads = 0;
 	private boolean restartPending = false;
 
@@ -37,11 +37,11 @@ public final class PcmAudioStream implements AudioStream {
 	private static final class RestartLogger {
 		private static long last = 0L;
 
-		static void log() {
+		static void log(int pads) {
 			long now = System.currentTimeMillis();
-			if (now - last > 1000L) {
+			if (now - last > 500L) {
 				last = now;
-				dev.clouddisc.CloudDiscClient.LOGGER.info("[CloudDisc] 单曲循环: 已请求重开音源 ✓ 正在垫静音等待数据 ✓");
+				dev.clouddisc.CloudDiscClient.LOGGER.info("[CloudDisc] 单曲循环: 已请求重开音源 ✓ 垫静音中（已垫 {} 段，约 {} ms）", pads, pads * 20);
 			}
 		}
 	}
@@ -96,10 +96,13 @@ public final class PcmAudioStream implements AudioStream {
 						return direct;
 					}
 					if (justRestarted) {
-						RestartLogger.log();
+					RestartLogger.log(silencePads);
 					}
 					// 垫 20ms 静音 ✓（= 1920 字节 @48k/16bit/mono ✓ 取 size 与 1920 的较小值 ✓）
 					silencePads++;
+					if (silencePads % 25 == 0) {
+						dev.clouddisc.CloudDiscClient.LOGGER.info("[CloudDisc] 单曲循环: 仍在等待解码器补数据… 已垫 {} 段（约 {} ms）", silencePads, silencePads * 20);
+					}
 					int pad = Math.min(size, 1920);
 					java.util.Arrays.fill(scratch, 0, pad, (byte) 0);
 					direct.clear();
