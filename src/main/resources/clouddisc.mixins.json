@@ -15,7 +15,8 @@
     "ChannelHandleAccessor",
     "SourceMixin",
     "SoundSystemMixin",
-    "SoundLoaderMixin"
+    "SoundLoaderMixin",
+    "LivingEntityRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 0

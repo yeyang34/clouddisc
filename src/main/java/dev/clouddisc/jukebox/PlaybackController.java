@@ -456,6 +456,18 @@ public final class PlaybackController {
 		// 不再跟着音频块（约 85ms/块）走。传 s.instance 是为了按声音实例精确反查 source id。
 		// 之前插在"发起方心跳块"里 → 跟随方（就是听的人）永远不评估 → 隔墙毫无变化。
 		dev.clouddisc.audio.Acoustics.tick(s.pos(), s.instance, nowTick);
+		// 【彩蛋 · 果冻】只在"正在播放触发曲"的那台唱片机上生效；一旦停/换碟/拔碟立刻消失 ✓
+		try {
+			boolean jellyPlaying = s.state == JukeboxSession.State.PLAYING
+					&& dev.clouddisc.easteregg.JellyEffect.TRIGGER_TRACK_ID.equals(s.trackId);
+			if (jellyPlaying) {
+				var jb = s.pos();
+				dev.clouddisc.easteregg.JellyEffect.update(true, jb.getX() + 0.5, jb.getY() + 0.5, jb.getZ() + 0.5, 10.0);
+			} else {
+				dev.clouddisc.easteregg.JellyEffect.deactivate();
+			}
+		} catch (Throwable ignored) {
+		}
 		long sinceStart = nowTick - s.startedTick;
 		if (sinceStart >= 20L && !s.consumptionLogged1s) {
 			s.consumptionLogged1s = true;
@@ -986,6 +998,7 @@ public final class PlaybackController {
 	}
 
 	private void stopQuiet(JukeboxSession s) {
+		dev.clouddisc.easteregg.JellyEffect.deactivate();   // 停止即消失 ✓
 		sessions.remove(s.key);
 		// ===== 【26.2 修复 · 到结尾卡住 / 反复播最后一点】=====
 		// 只让流结束是不够的 ✗（日志实测：流结束后「引擎已消费 7627ms，缓冲积压 0ms」✗
