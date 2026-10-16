@@ -71,9 +71,9 @@ public final class AudioPipeline implements AutoCloseable {
 		// 注意：这行必须放在 try 的【正常路径】里 ✗ 放进 catch 就永远走不到 ✗（踩过）
 		try {
 			// 循环改由【原版引擎】负责（isLooping + read 返回 null）✓ 这里关闭自带循环 ✗
-			this.loopForever = false;
+			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
 		} catch (Throwable ignored) {
-			this.loopForever = false;
+			this.loopForever = dev.clouddisc.CloudDiscConfig.get().loopSingle;
 		}
 
 		this.worker = new Thread(this::loop, "CloudDisc-Decoder");
@@ -311,24 +311,34 @@ public final class AudioPipeline implements AutoCloseable {
 						try { Thread.sleep(5L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
 						continue;
 					}
-					// 【stream 驱动循环】解码到底时：
-					//   · 若这条管线【能循环】（有音源工厂）⇒ 不结束流 ✗ 保持线程存活 ✓
-					//     在这里等流端调用 requestSeek(0)（即"重开"请求 ✓）然后回到循环顶部执行 seek ✓
-					//     为什么不 finish ✗：一 finish 流端就 EOF ✗ 会陷入"垫静音→重开→又 EOF"的半秒循环 ✗（实测踩过 ✓）
-					//   · 不能循环 ⇒ 老实结束 ✓（原版行为 ✓）
-					if (sourceFactory != null) {
-						this.reachedEnd = true;   // 告诉流端：已经到底了 ✓ 该重开了 ✓
-						CloudDiscAudio.LOG.info("[CloudDisc] 解码到底(第 {} 次)：进入等待重开 ✓", loopCount + 1);
-						while (running && requestedSeekMs == appliedSeekMs) {
-							try {
-								Thread.sleep(20L);
-							} catch (InterruptedException ie) {
-								Thread.currentThread().interrupt();
-								return;
-							}
+					// 【单曲循环 · 最终方案】完全在管线内部完成 ✓ 不依赖流端 ✓ 不垫静音 ✓
+					// 三个关键点：
+					//   ① 绝不 ring.finish() ✗（一 finish 流端就 EOF ⇒ 播放断掉 ✓）
+					//   ② 绝不 ring.clear()  ✗（缓冲里还留着上一遍的尾巴 ⇒ 正是它让衔接无缝 ✓）
+					//   ③ 换上新音源后【直接 continue 接着解码】✓ 新数据自然接到缓冲尾部 ✓
+					if (loopForever && sourceFactory != null) {
+						PcmSource fresh = null;
+						try {
+							fresh = sourceFactory.get();
+						} catch (Throwable t) {
+							CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开音源异常: {}", t.toString());
 						}
-						CloudDiscAudio.LOG.info("[CloudDisc] 收到重开请求：回到循环顶部执行 seek ✓");
-						continue;   // 收到重开请求 ⇒ 回顶执行 seek ✓
+						if (fresh != null) {
+							try {
+								source.close();
+							} catch (Throwable ignored) {
+							}
+							source = fresh;
+							len = 0;
+							pos = 0.0;
+							writtenBytes.set(0L);
+							appliedSeekMs = 0L;
+							requestedSeekMs = 0L;
+							loopCount++;
+							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环: 已在管线内接上下一遍（第 {} 次）✓", loopCount);
+							continue;
+						}
+						CloudDiscAudio.LOG.warn("[CloudDisc] 循环重开失败（音源工厂返回空）⇒ 结束播放");
 					}
 					ring.finish();
 					return;
