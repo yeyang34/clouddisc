@@ -40,6 +40,29 @@ public final class CloudDiscClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		// ===== 【混入自检】不需要玩游戏就能确认 mixin 是否真的应用 ✓ =====
+		// mixin 会把方法【合并进目标类】✓ 反射查一下就知道 ✓（以前这里写错过锚点，一直没生效 ✗）
+		try {
+			Class<?> jsp = Class.forName("net.minecraft.world.item.JukeboxSongPlayer");
+			boolean jb = false;
+			for (java.lang.reflect.Method m : jsp.getDeclaredMethods()) {
+				if (m.getName().contains("clouddisc$holdStop") || m.getName().contains("clouddisc$keepPlaying")) {
+					jb = true;
+				}
+			}
+			LOGGER.info("[CloudDisc] 混入自检: JetboxSongPlayer 注入={} ✓（时长解锁）", jb);
+			Class<?> ler = Class.forName("net.minecraft.client.renderer.entity.LivingEntityRenderer");
+			boolean jelly = false;
+			for (java.lang.reflect.Method m : ler.getDeclaredMethods()) {
+				if (m.getName().contains("clouddisc$jelly")) {
+					jelly = true;
+				}
+			}
+			LOGGER.info("[CloudDisc] 混入自检: 生物渲染注入={} ✓（彩蛋果冻）", jelly);
+			LOGGER.info("[CloudDisc] 彩蛋说明: 播放 @3438848556 时，唱片机 10 格内的生物会变成果冻；停止播放立即消失 ✓");
+		} catch (Throwable t) {
+			LOGGER.warn("[CloudDisc] 混入自检异常: {}", t.toString());
+		}
 				// 【26.2】注册中继通道的载荷类型。
 		// 注意方向（踩过一次坑 ✓）：
 		//   clientboundPlay  = 客户端【收】服务端的包（我们的应答 HELLO 走这个 ✓）
