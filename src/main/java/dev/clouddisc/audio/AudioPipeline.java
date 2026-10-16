@@ -308,6 +308,7 @@ public final class AudioPipeline implements AutoCloseable {
 					//   · 不能循环 ⇒ 老实结束 ✓（原版行为 ✓）
 					if (sourceFactory != null) {
 						this.reachedEnd = true;   // 告诉流端：已经到底了 ✓ 该重开了 ✓
+						CloudDiscAudio.LOG.info("[CloudDisc] 解码到底(第 {} 次)：进入等待重开 ✓", loopCount + 1);
 						while (running && requestedSeekMs == appliedSeekMs) {
 							try {
 								Thread.sleep(20L);
@@ -316,6 +317,7 @@ public final class AudioPipeline implements AutoCloseable {
 								return;
 							}
 						}
+						CloudDiscAudio.LOG.info("[CloudDisc] 收到重开请求：回到循环顶部执行 seek ✓");
 						continue;   // 收到重开请求 ⇒ 回顶执行 seek ✓
 					}
 					ring.finish();
