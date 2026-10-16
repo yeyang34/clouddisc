@@ -47,8 +47,13 @@ public class SoundEngineMixin {
 			return ALC10.alcCreateContext(device, original);
 		}
 		try (MemoryStack stack = MemoryStack.stackPush()) {
-			IntBuffer attrs = stack.mallocInt(4);
+			// 【0.13.2】6 个 int = 3 对属性（aux send + HRTF）
+			IntBuffer attrs = stack.mallocInt(6);
 			attrs.put(EXTEfx.ALC_MAX_AUXILIARY_SENDS).put(4).put(0).put(0);
+			// 【0.13.2】申请 HRTF：让"远耳"按真实头部遮蔽衰减（6~20 dB），
+			// 而不是 OpenAL 默认的硬声道声像（远耳被压得过分小，近场尤其不真实）。
+			// 设备/驱动不支持时 OpenAL 会自动忽略，无副作用。
+			attrs.put(org.lwjgl.openal.SOFTHRTF.ALC_HRTF_SOFT).put(ALC10.ALC_TRUE).put(0).put(0);
 			attrs.flip();
 			long ctx = ALC10.alcCreateContext(device, attrs);
 			if (ctx != 0L) {

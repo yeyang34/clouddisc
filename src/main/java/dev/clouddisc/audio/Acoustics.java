@@ -159,6 +159,10 @@ public final class Acoustics {
 		float occlusionAcc;
 		/** 0.12.6 诊断：主射线之外的 8 条偏移射线里，有几条"通透"（≤ {@link #OPEN_PATH_OCC}）。 */
 		int lastOpenPaths;
+		/** 【0.13.4】要在 SoundSystem#tick 之后再重写一次的声源位置。 */
+		double writtenX = Double.NaN;
+		double writtenY = Double.NaN;
+		double writtenZ = Double.NaN;
 		/** 0.12.6 诊断：本轮实际用的遮挡陡度 k（= 配置值 x 强度）。 */
 		float lastK;
 		/** 0.12.6 诊断：主射线（未放宽）的遮挡值，用来对比"放宽了多少"。 */
@@ -1534,6 +1538,27 @@ public final class Acoustics {
 			}
 		}
 		return dist;
+	}
+
+		/** 【0.13.4】由 SoundSystemTickMixin 在 SoundSystem#tick 尾部调用：把声源位置改成"向听者拉近"的版本。 */
+	static void afterSoundSystemTick() {
+		try {
+			java.util.Map<Integer, State> snapshot;
+			synchronized (STATES) {
+				if (STATES.isEmpty()) {
+					return;
+				}
+				snapshot = new java.util.HashMap<>(STATES);
+			}
+			for (java.util.Map.Entry<Integer, State> e : snapshot.entrySet()) {
+				State st = e.getValue();
+				if (st == null || Double.isNaN(st.writtenX)) {
+					continue;
+				}
+				applyPosition(e.getKey(), st, st.writtenX, st.writtenY, st.writtenZ);
+			}
+		} catch (Throwable ignored) {
+		}
 	}
 
 	private static boolean directionEnabled() {
