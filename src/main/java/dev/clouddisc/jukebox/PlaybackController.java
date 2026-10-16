@@ -246,6 +246,7 @@ public final class PlaybackController {
 			CloudDiscClient.LOGGER.info("[CloudDisc] 收到世界事件 1011（唱片机停止/取出唱片）@ {}｜本机有会话={}", pos, live != null);
 			if (live != null) {
 				live.dispose();
+				dev.clouddisc.easteregg.JellyEffect.deactivate();   // 拔碟/换碟 ⇒ 彩蛋立刻消失 ✓
 				announcer.announceStop(live, nowTick);
 				return Decision.CANCEL;
 			}

@@ -77,17 +77,19 @@ public final class JellyEffect {
 	 * @param entityId 实体 id（用来错开相位 ✓）
 	 * @param height   实体视觉高度（旋转轴心取 y = height/2 ✓）
 	 */
-	public static void apply(PoseStack pose, int entityId, float height) {
+	public static void apply(PoseStack pose, int entityId, float height, float ageInTicks) {
 		if (!active) {
 			return;
 		}
-		double t = (System.nanoTime() / 1_000_000_000.0) + (entityId % 20) * 0.15;
-		// 果冻伸缩：0.65 ~ 1.35 ✓ 水平反向（体积感 ✓）
-		double sy = 1.0 + 0.35 * Math.sin(t * 3.0);
-		double sxz = 1.0 - 0.18 * Math.sin(t * 3.0);
-		float bounce = (float) Math.max(0.0, 0.15 * Math.sin(t * 3.0));
-		// 旋转：每 1.2 秒一圈 ✓（围绕视觉中心 ✓）
-		float angle = (float) ((t / 1.2) % 1.0 * Math.PI * 2.0);
+		// 用【渲染状态的 ageInTicks】做时间轴 ✓（每帧单调推进 ✓ 比 nanoTime 平滑得多 ✗ 之前卡就是这个原因 ✓）
+		double t = ageInTicks * 0.05 + (entityId % 20) * 0.13;
+		// 果冻伸缩：0.55 ~ 1.55 ✓ 力度加大（原来 ±0.35 太温柔 ✗）
+		double wave = Math.sin(t * 2.6);
+		double sy = 1.0 + 0.55 * wave;
+		double sxz = 1.0 - 0.30 * wave;
+		float bounce = (float) Math.max(0.0, 0.22 * wave);
+		// 旋转：每 1.0 秒一圈 ✓（用同一个时基 ✓ 旋转也就顺了 ✓）
+		float angle = (float) ((t * 0.5) % (Math.PI * 2.0));
 		float pivotY = Math.max(0.1f, height * 0.5f);
 
 		pose.translate(0.0f, bounce, 0.0f);

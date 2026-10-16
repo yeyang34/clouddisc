@@ -42,7 +42,7 @@ public abstract class LivingEntityRendererMixin {
 				return;
 			}
 			int phaseKey = (int) (state.x * 31.0 + state.z * 17.0);
-			JellyEffect.apply(pose, phaseKey, h);
+			JellyEffect.apply(pose, phaseKey, h, state.ageInTicks);
 		} catch (Throwable ignored) {
 			// 渲染里出任何错都不影响画面以外的东西 ✓
 		}
