@@ -119,6 +119,21 @@ public final class PcmRingBuffer {
 		notifyAll();
 	}
 
+	/**
+	 * 【单曲循环专用】把缓冲恢复成"可继续写入"的状态 ✓
+	 * 注意：clear() 只清数据 ✗ 不会复位 finished ✗
+	 * 而 EOF 时 finish() 把 finished 置成了 true ⇒ write() 会直接丢弃 ✗ read() 永远返回 -1 ✗
+	 * 所以循环时必须调用这个方法 ✓
+	 */
+	public synchronized void restart() {
+		readPos = 0;
+		writePos = 0;
+		available = 0;
+		finished = false;
+		starved = false;
+		notifyAll();
+	}
+
 	/** 解码线程读到文件尾时调用：等缓冲被取空后，读端收到 0。 */
 	public synchronized void finish() {
 		finished = true;

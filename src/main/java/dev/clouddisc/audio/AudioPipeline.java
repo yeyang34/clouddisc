@@ -28,7 +28,7 @@ public final class AudioPipeline implements AutoCloseable {
 	private final int inRate;
 	private final int inChannels;
 	private final float outputGain;
-	private final Thread worker;
+	private Thread worker;   // 循环时需要重启解码线程 ✓ 所以不能是 final ✓
 	private final AtomicLong writtenBytes = new AtomicLong();
 	private volatile boolean running = true;
 
@@ -108,6 +108,18 @@ public final class AudioPipeline implements AutoCloseable {
 		} catch (Throwable ignored) {
 		}
 		this.source = fresh;
+		// ① 复位环形缓冲：EOF 时 finish() 把 finished 置成了 true ✗
+		//    不复位的话 write() 会直接丢弃 ✓ read() 永远返回 -1 ✗（实测就是这样 ✗）
+		this.ring.restart();
+		// ② 解码线程在文件尾已经 return 掉了 ✗ 必须重新起一个 ✓
+		try {
+			this.worker = new Thread(this::loop, "CloudDisc-Decoder");
+			this.worker.setDaemon(true);
+			this.worker.start();
+		} catch (Throwable t) {
+			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重启解码线程失败: {}", t.toString());
+			return false;
+		}
 		// 强制让解码线程执行一次 seek(0)：把已应用位置置成不可能值 ✓
 		this.appliedSeekMs = Long.MIN_VALUE;
 		this.requestSeek(0L);
