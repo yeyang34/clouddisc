@@ -36,7 +36,7 @@ public final class JellyEffect {
 	 * 采集方式：把 bpm-track.mp3 丢进任意 BPM 工具（或手打拍子 ✓）读一个数 ✓ 填这里即可 ✓。
 	 * 填 0 = 不卡点（用原来的自由节奏 ✓）。
 	 */
-	public static final double BPM = 128.0;
+	public static final double BPM = 130.0;   // 采集值 ✓
 
 	/** 歌曲起始偏移（毫秒 ✓）：若第一拍不在 0 秒，把它填进来 ✓ 卡点会更准 ✓。 */
 	public static final double BEAT_OFFSET_MS = 0.0;
@@ -105,12 +105,12 @@ public final class JellyEffect {
 		double phaseOffset = (entityId % 20) * 0.03;
 		double b = beat + phaseOffset;
 		// 用"拍"驱动：一拍一个完整的拉伸-回弹循环 ✓（sin 的整数周期正好落在拍点上 ✓）
-		double wave = Math.sin(b * Math.PI * 2.0);
+		double wave = Math.cos(b * Math.PI * 2.0);   // 用 cos ✓ ⇒ 每一拍正好是"最大拉伸"✓（sin 会晚四分之一拍 ✗ 不卡点 ✗）
 		double sy = 1.0 + 0.55 * wave;
 		double sxz = 1.0 - 0.30 * wave;
 		float bounce = (float) Math.max(0.0, 0.22 * wave);
 		// 旋转：两拍一圈 ✓（也是整数倍 ⇒ 每拍都在同一朝向 ✓ 更"卡点"✓）
-		float angle = (float) ((b * Math.PI) % (Math.PI * 2.0));
+		float angle = (float) ((b * Math.PI * 2.0) % (Math.PI * 2.0));   // 一拍一圈 ✓（原来两拍一圈太慢 ✗）
 		float pivotY = Math.max(0.1f, height * 0.5f);
 
 		pose.translate(0.0f, bounce, 0.0f);
