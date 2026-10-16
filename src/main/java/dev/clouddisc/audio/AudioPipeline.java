@@ -301,86 +301,24 @@ public final class AudioPipeline implements AutoCloseable {
 						try { Thread.sleep(5L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
 						continue;
 					}
-					if (loopForever) {
-						// ===== 26.2 正确的单曲循环：重新打开音源 =====
-						// 为什么不用 seek：实测 seekSample(0) 后位置回不到 0，会空转且只剩一秒
-						// 做法：关掉旧音源，用工厂新建一个，从第 0 帧重新解码
-						// 下面旧块里那句 seekSample(0) 会作用在【新音源】上 = 本来就是 0 帧，完全无害
-						if (sourceFactory != null) {
-							// 不用墙钟做"循环太频繁"判断：解码远快于实时，7 秒的歌约 50ms 就解完，墙钟会误判
-							// 防空转由下面"重开音源后仍读不到数据就结束"兜住，足够了
-							PcmSource fresh = null;
+					// 【stream 驱动循环】解码到底时：
+					//   · 若这条管线【能循环】（有音源工厂）⇒ 不结束流 ✗ 保持线程存活 ✓
+					//     在这里等流端调用 requestSeek(0)（即"重开"请求 ✓）然后回到循环顶部执行 seek ✓
+					//     为什么不 finish ✗：一 finish 流端就 EOF ✗ 会陷入"垫静音→重开→又 EOF"的半秒循环 ✗（实测踩过 ✓）
+					//   · 不能循环 ⇒ 老实结束 ✓（原版行为 ✓）
+					if (sourceFactory != null) {
+						while (running && requestedSeekMs == appliedSeekMs) {
 							try {
-								fresh = sourceFactory.get();
-							} catch (Throwable t) {
-								CloudDiscAudio.LOG.warn("[CloudDisc] 重新打开音源失败: {}", t.toString());
-							}
-							if (fresh == null) {
-								CloudDiscAudio.LOG.warn("[CloudDisc] 无法重新打开音源 -> 结束播放（该音源不支持循环）");
-								ring.finish();
+								Thread.sleep(20L);
+							} catch (InterruptedException ie) {
+								Thread.currentThread().interrupt();
 								return;
 							}
-							try {
-								source.close();
-							} catch (Throwable ignored) {
-							}
-							source = fresh;
-							lastLoopNanos = System.nanoTime();
-							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环：已重新打开音源，回到开头");
-							// ★ 关键：重开成功后必须【跳过旧块】✗
-							// 旧块里有 ring.clear() ✗ 会把刚解码出的音频立刻清空 ✗
-							// → 环形缓冲永远不满 → 不被阻塞 → 同一秒内空转几百次 ✗（实测 359 次/秒 ✗）
-							// 直接 continue：让循环体重新开始，从新音源继续解码 ✓
-							len = 0;
-							pos = 0.0;
-							ring.clear();
-							writtenBytes.set(0L);
-							appliedSeekMs = 0L;
-							requestedSeekMs = 0L;
-							continue;
-						} else {
-							CloudDiscAudio.LOG.warn("[CloudDisc] 没有音源工厂，退回到 seek 方式（可能不准）");
 						}
-						try {
-							source.seekSample(0L);
-							len = 0;
-							pos = 0.0;
-							ring.clear();
-							writtenBytes.set(0L);
-							appliedSeekMs = 0L;
-							requestedSeekMs = 0L;
-							loopCount++;
-							CloudDiscAudio.LOG.info("[CloudDisc] 单曲循环（管线内）：回到开头，第 {} 次", loopCount);
-							n = source.read(in, in.length);
-							// 【26.2 修复 · 循环只挑一秒】回到开头后如果【一时读不到】✗
-							// 千万不要 ring.finish() ✗✗ —— 那会让 MC 的 Channel 反复播它队列里最后 1 秒 ✗
-							// 改为：小睡后重试（最多 40 次 ≈ 2 秒）✓ 仍不行就先写 100ms 静音垫住 ✓ 继续重试 ✓
-							int retry = 0;
-							while (n <= 0 && retry < 40 && running) {
-								retry++;
-								try {
-									Thread.sleep(50L);
-								} catch (InterruptedException ie) {
-									Thread.currentThread().interrupt();
-									break;
-								}
-								n = source.read(in, in.length);
-							}
-							if (n <= 0) {
-								CloudDiscAudio.LOG.warn("[CloudDisc] 循环后暂读不到数据（重试 {} 次）→ 写 100ms 静音垫住并继续重试，绝不结束流", retry);
-								int pad = (int) (100L * BYTES_PER_MS);
-								ring.write(new byte[pad], 0, pad);
-								continue;
-							}
-						} catch (Throwable t) {
-							CloudDiscAudio.LOG.warn("[CloudDisc] 循环回到开头失败，改为结束: {}", t.toString());
-							ring.finish();
-							return;
-						}
-					} else {
-						ring.finish();
-						return;
+						continue;   // 收到重开请求 ⇒ 回顶执行 seek ✓
 					}
+					ring.finish();
+					return;
 				}   // ← 闭合 if (n <= 0) 块 ✓（之前漏了这个括号 ✗）
 				int frames = n / inChannels;
 				if (len + frames > buf.length) {
