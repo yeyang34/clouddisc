@@ -48,6 +48,11 @@ public final class PcmAudioStream implements AudioStream {
 
 	public void setRestartOnEof(java.util.function.BooleanSupplier s) { this.restartOnEof = s; }
 
+	/** 由管线提供：解码线程是否已经读到文件尾 ✓（欠载 + 已到底 ⇒ 该循环了 ✓） */
+	private java.util.function.BooleanSupplier endReached;
+
+	public void setEndReached(java.util.function.BooleanSupplier s) { this.endReached = s; }
+
 	public PcmAudioStream(PcmRingBuffer ring, long timeoutMs, Runnable onClose) {
 		this.ring = ring;
 		this.timeoutMs = timeoutMs;
@@ -112,6 +117,40 @@ public final class PcmAudioStream implements AudioStream {
 				}
 			}
 			return null;   // 无法循环 ⇒ 真正结束 ✓
+		}
+		if (n == 0 && restartOnEof != null && endReached != null && endReached.getAsBoolean()) {
+			// 【循环触发点】环形缓冲欠载，且解码线程已读到文件尾 ⇒ 就是"该重开了"✓
+			// 这里绝不再干等（那会卡住声音引擎线程 ✗）—— 只踢一下重开 + 垫 20ms 静音 ✓
+			boolean justRestarted2 = false;
+			if (!restartPending) {
+				try {
+					restartPending = restartOnEof.getAsBoolean();
+				} catch (Throwable t) {
+					restartPending = false;
+				}
+				justRestarted2 = restartPending;
+			}
+			if (restartPending) {
+				int m2 = ring.read(scratch, 0, size, 0L);
+				if (m2 > 0) {
+					restartPending = false;
+					silencePads = 0;
+					direct.clear();
+					direct.put(scratch, 0, m2);
+					direct.flip();
+					return direct;
+				}
+				if (justRestarted2) {
+					RestartLogger.log(silencePads);
+				}
+				silencePads++;
+				int pad2 = Math.min(size, 1920);
+				java.util.Arrays.fill(scratch, 0, pad2, (byte) 0);
+				direct.clear();
+				direct.put(scratch, 0, pad2);
+				direct.flip();
+				return direct;
+			}
 		}
 		if (n == 0) {
 			// 欠载：返回 null —— 1.20.1 的 Channel.pumpBuffers 会安全跳过这一轮，

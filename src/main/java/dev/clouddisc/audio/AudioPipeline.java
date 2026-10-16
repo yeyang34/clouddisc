@@ -34,6 +34,10 @@ public final class AudioPipeline implements AutoCloseable {
 
 	/** 【26.2 · 单曲循环】为 true 时，解码到结尾不结束流，而是回到 0 秒继续解码 ✓ */
 	private volatile boolean loopForever = false;
+	/** 【循环信号】解码线程已经读到文件尾（与 ring.finish() 无关 ✓ 后者会结束整条流 ✗） */
+	private volatile boolean reachedEnd = false;
+
+	public boolean reachedEnd() { return reachedEnd; }
 	private volatile int loopCount = 0;
 
 	/** 由 PlaybackController 按配置 loopSingle 设置 ✓ */
@@ -220,6 +224,7 @@ public final class AudioPipeline implements AutoCloseable {
 					ring.clear();
 					writtenBytes.set(BYTES_PER_MS * seek);
 					appliedSeekMs = seek;
+					this.reachedEnd = false;   // 已重新开始解码 ✓ 清信号 ✓
 					synchronized (this) {
 						notifyAll();
 					}
@@ -307,6 +312,7 @@ public final class AudioPipeline implements AutoCloseable {
 					//     为什么不 finish ✗：一 finish 流端就 EOF ✗ 会陷入"垫静音→重开→又 EOF"的半秒循环 ✗（实测踩过 ✓）
 					//   · 不能循环 ⇒ 老实结束 ✓（原版行为 ✓）
 					if (sourceFactory != null) {
+						this.reachedEnd = true;   // 告诉流端：已经到底了 ✓ 该重开了 ✓
 						while (running && requestedSeekMs == appliedSeekMs) {
 							try {
 								Thread.sleep(20L);
