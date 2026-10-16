@@ -115,15 +115,10 @@ public final class AudioPipeline implements AutoCloseable {
 		// ① 复位环形缓冲：EOF 时 finish() 把 finished 置成了 true ✗
 		//    不复位的话 write() 会直接丢弃 ✓ read() 永远返回 -1 ✗（实测就是这样 ✗）
 		this.ring.restart();
-		// ② 解码线程在文件尾已经 return 掉了 ✗ 必须重新起一个 ✓
-		try {
-			this.worker = new Thread(this::loop, "CloudDisc-Decoder");
-			this.worker.setDaemon(true);
-			this.worker.start();
-		} catch (Throwable t) {
-			CloudDiscAudio.LOG.warn("[CloudDisc] 循环重启解码线程失败: {}", t.toString());
-			return false;
-		}
+		// 【重要】这里【不要】新起解码线程 ✗
+		// 老线程读到文件尾后并没有退出 ✓ 它正在原地等 seek 请求 ✓
+		// 再起一个 ⇒ 两个线程同时往同一个环形缓冲写 ✗ 数据错乱 ⇒ 第二遍之后就没声 ✓（实测第三遍没声 ✓）
+		// 正确做法：只靠下面那句 requestSeek(0) 踢醒老线程 ✓
 		// 强制让解码线程执行一次 seek(0)：把已应用位置置成不可能值 ✓
 		this.appliedSeekMs = Long.MIN_VALUE;
 		this.requestSeek(0L);
