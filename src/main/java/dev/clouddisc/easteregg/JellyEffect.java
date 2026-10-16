@@ -45,7 +45,7 @@ public final class JellyEffect {
 	private static volatile double centerX;
 	private static volatile double centerY;
 	private static volatile double centerZ;
-	private static volatile double radius = 10.0;
+	private static volatile double radius = 20.0;
 
 	private JellyEffect() {
 	}
@@ -57,7 +57,7 @@ public final class JellyEffect {
 			centerX = x;
 			centerY = y;
 			centerZ = z;
-			radius = r > 0 ? r : 10.0;
+			radius = r > 0 ? r : 20.0;
 		}
 	}
 

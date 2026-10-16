@@ -470,7 +470,7 @@ public final class PlaybackController {
 					&& dev.clouddisc.easteregg.JellyEffect.TRIGGER_TRACK_ID.equals(s.trackId);
 			if (jellyPlaying) {
 				var jb = s.pos();
-				dev.clouddisc.easteregg.JellyEffect.update(true, jb.getX() + 0.5, jb.getY() + 0.5, jb.getZ() + 0.5, 10.0);
+				dev.clouddisc.easteregg.JellyEffect.update(true, jb.getX() + 0.5, jb.getY() + 0.5, jb.getZ() + 0.5, 20.0);   // 半径 20 格（原 10 ✗ 已翻倍 ✓）
 			} else {
 				dev.clouddisc.easteregg.JellyEffect.deactivate();
 			}
