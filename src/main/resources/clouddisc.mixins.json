@@ -16,7 +16,8 @@
     "SourceMixin",
     "SoundSystemMixin",
     "SoundLoaderMixin",
-    "LivingEntityRendererMixin"
+    "LivingEntityRendererMixin",
+    "AvatarRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 0
