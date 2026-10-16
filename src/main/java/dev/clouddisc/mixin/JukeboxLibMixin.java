@@ -43,6 +43,36 @@ public abstract class JukeboxLibMixin {
 	@org.spongepowered.asm.mixin.Unique
 	private static long clouddisc$lastProbe = 0L;
 
+	/**
+	 * 【时长解锁 · 正确做法】原版在 tick 里判断"放完了吗"，放完就 stop ✗
+	 * 日志实测：tick 注入在跑 ✓ 但 stop 注入【从未执行】✗ ⇒ 不去猜停止走哪条路 ✗
+	 * 改成【从源头让它永不放完】✓：tick 开头若"已放完"且【是云唱片】⇒ 计数归零 ✓
+	 *   · hasFinished 变 false ✓ 原版不 stop ✓ 不发 1011 ✓
+	 *   · 归零 ≠ 冻住 ✓ 计数继续正常增长 ✓ 粒子按原版节奏喷 ✓（v2 喷泉问题的解法 ✓）
+	 *   · 原版唱片一律不动 ✓
+	 */
+	@Inject(method = "tick", at = @At("HEAD"))
+	private void clouddisc$keepPlaying(LevelAccessor level, BlockState state, CallbackInfo ci) {
+		try {
+			JukeboxSongPlayer self = (JukeboxSongPlayer) (Object) this;
+			net.minecraft.world.item.JukeboxSong song = self.getSong();
+			if (song == null) {
+				return;
+			}
+			long ticks = self.getTicksSinceSongStarted();
+			if (!song.hasFinished(ticks)) {
+				return;
+			}
+			if (!clouddisc$isOurDisc(level)) {
+				return;
+			}
+			((JukeboxSongPlayerAccessor) self).clouddisc$setTicksSinceSongStarted(0L);
+			CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁: 已到 {} 刻，云唱片计数归零继续播放 ✓", ticks);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 时长解锁归零失败（照常结束）: {}", t.toString());
+		}
+	}
+
 	@Inject(method = "tick", at = @At("HEAD"))
 	@org.spongepowered.asm.mixin.Unique
 	private void clouddisc$probeTick(LevelAccessor level, BlockState state, CallbackInfo ci) {
