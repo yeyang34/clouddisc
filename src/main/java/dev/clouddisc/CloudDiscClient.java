@@ -40,6 +40,8 @@ public final class CloudDiscClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		// 【鼠标悬停显示网易云曲名】✓ 铁砧里仍然写曲目 id ✓
+		dev.clouddisc.gui.DiscTooltip.register();
 		// ===== 【混入自检】不需要玩游戏就能确认 mixin 是否真的应用 ✓ =====
 		// mixin 会把方法【合并进目标类】✓ 反射查一下就知道 ✓（以前这里写错过锚点，一直没生效 ✗）
 		try {

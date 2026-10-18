@@ -175,7 +175,10 @@ public final class CloudDiscConfig {
 
 	/** 是否允许聊天通道作为兜底信令/数据通道。 */
 	/** 【单曲循环】一张云唱片播完后，自动回到开头继续播（默认开 ✓）。 */
-	public boolean loopSingle = true;   // 单曲循环：播完自动回到开头   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
+	public boolean loopSingle = true;
+
+	/** 鼠标悬停唱片时显示网易云曲名（铁砧里仍然只写曲目 id ✓） */
+	public boolean showDiscTooltip = true;   // 单曲循环：播完自动回到开头   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
 
 	public boolean enableChatRelay = false;   // 聊天兜底：默认关闭（会刷聊天栏）；同步优先走服务器中继 / UDP
 	/**
