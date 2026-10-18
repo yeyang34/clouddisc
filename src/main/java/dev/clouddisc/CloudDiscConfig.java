@@ -181,7 +181,10 @@ public final class CloudDiscConfig {
 	public boolean showDiscTooltip = true;
 
 	/** 铁砧界面里显示「网易云选歌」按钮与提示（默认 true ✓） */
-	public boolean anvilAssist = true;   // 单曲循环：播完自动回到开头   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
+	public boolean anvilAssist = true;
+
+	/** 空气连通就不闷（8 条偏移射线 ≥3 条通透 ⇒ 遮挡压到 0.05）✓ 默认 true */
+	public boolean physicsOpenAirRelax = true;   // 单曲循环：播完自动回到开头   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
 
 	public boolean enableChatRelay = false;   // 聊天兜底：默认关闭（会刷聊天栏）；同步优先走服务器中继 / UDP
 	/**

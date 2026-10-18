@@ -512,6 +512,17 @@ public final class Acoustics {
 
 			double fracBlocked = 1.0 - (openPaths / 8.0);
 			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
+			// ===== 【空气连通 ⇒ 不闷】（用户实测：贴着唱片机放个铁砧就把主射线挡住 ✗ 空气明明四处都通 ✓）=====
+			// 判据只用【空气连通性】✗ 不看"中间那一格是谁" ✓：
+			//   8 条偏移射线里 ≥3 条通透 ⇒ 声音明显绕得过去 ⇒ 遮挡压到 0.05（≈ -26 dB 高频以下 ✓ 听感几乎无变化 ✓）
+			//   完全不连通（贴脸整面墙 / 封闭小屋无门）⇒ 通透 ≈ 0 ⇒ 保持上面的材质遮挡 ⇒ 该闷的仍然闷 ✓
+			// 开关：physicsOpenAirRelax（默认 true ✓ 关掉即回到原算法 ✓）
+			{
+				CloudDiscConfig cfgOa = CloudDiscConfig.get();
+				if ((cfgOa == null || cfgOa.physicsOpenAirRelax) && openPaths >= 3) {
+					occ = Math.min(occ, 0.05);
+				}
+			}
 			// ===== 【26.2 · 方案乙】紧贴实心隔断的另一侧，不做"最通畅路"清零 =====
 			// 场景：唱片机上方封严，听者就站在屋顶上（声源→听者连线近似垂直）。
 			//   实测 [M7]：主射线遮挡=2.000（屋顶确实被射线打到）✗ 但 通透通路=8/8 ✗
@@ -693,6 +704,7 @@ public final class Acoustics {
 		}
 		for (int i = 0; i < EfxEngine.MAX_BANDS; i++) {
 			float v = clamp01(g[i] * rr.distanceFactor * level * SEND_BOOST);
+			v = Math.min(v, SEND_CAP);   // 安全网：遮挡被压很低时混响发送不超过 0.35，避免反馈自激炸耳 ✓
 			if (i >= 2) {
 				v = clamp01((v - 0.03f) / 0.97f);
 			}
@@ -770,6 +782,9 @@ public final class Acoustics {
 	private static final float REVERB_FADE_DISTANCE = 48.0f;
 	/** 0.12.6：发送基准整体提升（用户反馈"余响偏含蓄"，但优先级低于"变闷"）。 */
 	private static final float SEND_BOOST = 2.08f;
+
+	/** 混响发送上限（安全网 ✓ 遮挡接近 0 时防止 EFX 反馈自激炸耳 ✓） */
+	private static final float SEND_CAP = 0.35f;
 	/** 每次评估最多做多少次"命中点 → 耳朵通不通"的测试（只在被挡时做）。 */
 	private static final int MAX_CLEAR_LINE_TESTS = 48;
 
