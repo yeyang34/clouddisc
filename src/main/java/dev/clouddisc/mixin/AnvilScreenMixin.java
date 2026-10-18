@@ -45,13 +45,7 @@ public abstract class AnvilScreenMixin {
 	@Shadow
 	private EditBox name;
 
-	/**
-	 * 往界面里加控件（26.2 实测签名 ✓ 受保护 ✓ 泛型 ✓）
-	 * <pre>protected &lt;T extends GuiEventListener &amp; Renderable &amp; NarratableEntry&gt; T addRenderableWidget(T)</pre>
-	 * 不继承 {@code ItemCombinerScreen}（它没有无参构造 ✗）就只能这样拿到它 ✓
-	 */
-	@Shadow
-	protected abstract <T extends GuiEventListener & Renderable & NarratableEntry> T addRenderableWidget(T widget);
+
 
 	/** 上一次选中的显示名（状态行用 ✓）。 */
 	@Unique
@@ -62,6 +56,33 @@ public abstract class AnvilScreenMixin {
 
 	@Unique
 	private static final int CD_GUI_H = 166;
+
+	/**
+	 * 用反射往界面里加按钮 ✓
+	 *
+	 * <p>为什么不用 {@code @Shadow} ✗：26.2 的
+	 * {@code protected <T extends GuiEventListener & Renderable & NarratableEntry> T addRenderableWidget(T)}
+	 * 是泛型方法 ✓ Mixin 没认出来（实测报 "was not located in the target class" ✗ "No refMap loaded" ✓）
+	 * ⇒ 改用反射，按名字在父类链上找 ✓ 擦除后的参数类型是 GuiEventListener ✓ Button 实现了它 ✓
+	 */
+	@Unique
+	private boolean clouddisc$addWidgetReflect(Object widget) {
+		try {
+			for (Class<?> k = AnvilScreen.class; k != null; k = k.getSuperclass()) {
+				for (java.lang.reflect.Method m : k.getDeclaredMethods()) {
+					if ("addRenderableWidget".equals(m.getName()) && m.getParameterCount() == 1
+							&& !m.isBridge() && !m.isSynthetic()) {
+						m.setAccessible(true);
+						m.invoke(this, widget);
+						return true;
+					}
+				}
+			}
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 反射加控件失败: {}", t.toString());
+		}
+		return false;
+	}
 
 	@Inject(method = "subInit", at = @At("TAIL"))
 	private void clouddisc$addPickButton(CallbackInfo ci) {
@@ -81,8 +102,8 @@ public abstract class AnvilScreenMixin {
 			int guiY = (h - CD_GUI_H) / 2;
 			Button btn = Button.builder(Component.literal("☁ 网易云选歌"), b -> clouddisc$openPicker())
 					.bounds(guiX, guiY + CD_GUI_H + 5, CD_GUI_W, 20).build();
-			this.addRenderableWidget(btn);
-			CloudDiscClient.LOGGER.info("[CloudDisc] 铁砧已加「网易云选歌」按钮 ✓（位置 {},{}）", guiX, guiY + CD_GUI_H + 5);
+			boolean added = clouddisc$addWidgetReflect(btn);
+			CloudDiscClient.LOGGER.info("[CloudDisc] 铁砧按钮: 反射加控件={} 位置=({},{})", added, guiX, guiY + CD_GUI_H + 5);
 		} catch (Throwable t) {
 			CloudDiscClient.LOGGER.warn("[CloudDisc] 铁砧按钮注入失败（不影响改名）: {}", t.toString());
 		}
