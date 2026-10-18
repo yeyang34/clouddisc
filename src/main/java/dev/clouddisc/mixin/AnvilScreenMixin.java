@@ -51,6 +51,35 @@ public abstract class AnvilScreenMixin {
 	@Unique
 	private String clouddisc$pickedName = null;
 
+	/**
+	 * ★ 复刻【玩家手打名字】那条原版路径 ✓
+	 *
+	 * <p>{@code EditBox.setValue()} <b>不会触发 responder</b> ✗（实测：名字看着改了 ✓ 但服务端不知道 ✗
+	 * 结果槽不重算 ⇒ 拿到的还是旧名字 ✓ 这就是"选好了但名字没改"的原因 ✓）。
+	 *
+	 * <p>原版链路是：{@code EditBox responder → AnvilScreen.onNameChanged(String)} ✓
+	 * 由它更新菜单并把改名发给服务端 ✓ 所以这里反射调那个私有方法 ✓
+	 */
+	@Unique
+	private boolean clouddisc$notifyNameChanged(String value) {
+		try {
+			for (Class<?> k = AnvilScreen.class; k != null; k = k.getSuperclass()) {
+				for (java.lang.reflect.Method m : k.getDeclaredMethods()) {
+					if ("onNameChanged".equals(m.getName()) && m.getParameterCount() == 1
+							&& m.getParameterTypes()[0] == String.class) {
+						m.setAccessible(true);
+						m.invoke(this, value);
+						return true;
+					}
+				}
+			}
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 没找到 onNameChanged ✗ 退回直接改菜单 ✓");
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 调 onNameChanged 失败: {}", t.toString());
+		}
+		return false;
+	}
+
 	@Unique
 	private static final int CD_GUI_W = 176;
 
@@ -120,15 +149,20 @@ public abstract class AnvilScreenMixin {
 				try {
 					String value = prefix + id;
 					if (this.name != null) {
-						this.name.setValue(value);
+						this.name.setValue(value);                          // ① 只改显示（不改服务端 ✗）
 					}
-					Object menu = ((AbstractContainerScreen<?>) (Object) this).getMenu();
-					if (menu instanceof AnvilMenu anvil) {
-						anvil.setItemName(value);
+					// ② ★ 必须走原版路径：更新菜单 + 把改名请求发给服务端 ✓
+					//    只 setValue 不触发 responder ✗ 服务端收不到 ⇒ 结果槽不重算 ⇒ 名字没变 ✓（实测症状 ✓）
+					boolean notified = clouddisc$notifyNameChanged(value);
+					if (!notified) {
+						Object menu = ((AbstractContainerScreen<?>) (Object) this).getMenu();
+						if (menu instanceof AnvilMenu anvil) {
+							anvil.setItemName(value);
+						}
 					}
 					clouddisc$pickedName = display;
-					CloudDiscClient.LOGGER.info("[CloudDisc] 铁砧已填入「{}」（{}）✓ 从铁砧拿取唱片即完成 ✓",
-							value, display);
+					CloudDiscClient.LOGGER.info("[CloudDisc] 铁砧已填入「{}」（{}）原版改名路径={} ✓ 现在从铁砧拿取唱片即完成 ✓",
+							value, display, notified);
 				} catch (Throwable t) {
 					CloudDiscClient.LOGGER.warn("[CloudDisc] 回填改名框失败: {}", t.toString());
 				}
