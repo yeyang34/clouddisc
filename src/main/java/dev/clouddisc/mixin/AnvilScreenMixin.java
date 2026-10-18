@@ -51,6 +51,14 @@ public abstract class AnvilScreenMixin {
 	@Unique
 	private String clouddisc$pickedName = null;
 
+	/** ★ 待回填的名字：选歌时先记下 ✓ 等铁砧界面重建完成后再落地 ✓（选歌时写会被重建冲掉 ✗ 实测） */
+	@Unique
+	private String clouddisc$pending = null;
+
+	/** 按钮引用：用来按"输入槽有没有物品"控制显隐 ✓ */
+	@Unique
+	private Button clouddisc$btn = null;
+
 	/**
 	 * ★ 复刻【玩家手打名字】那条原版路径 ✓
 	 *
@@ -80,7 +88,50 @@ public abstract class AnvilScreenMixin {
 		return false;
 	}
 
+	/** 按"铁砧输入槽里有没有物品"控制按钮显隐 ✓（没放东西就不该出现 ✓）。 */
 	@Unique
+	private void clouddisc$syncButton() {
+		try {
+			if (clouddisc$btn == null) {
+				return;
+			}
+			Object menu = ((AbstractContainerScreen<?>) (Object) this).getMenu();
+			boolean hasItem = false;
+			if (menu instanceof AnvilMenu anvil) {
+				hasItem = !anvil.getSlot(AnvilMenu.INPUT_SLOT).getItem().isEmpty();
+			}
+			clouddisc$btn.visible = hasItem;
+		} catch (Throwable t) {
+			// 显隐失败保持默认（可见 ✓）不影响功能 ✓
+		}
+	}
+
+	/** ★ 落地待回填的名字 ✓ 只在铁砧界面已经重建好之后调用 ✓。 */
+	@Unique
+	private void clouddisc$applyPending() {
+		String value = clouddisc$pending;
+		if (value == null) {
+			return;
+		}
+		try {
+			if (this.name != null) {
+				this.name.setValue(value);
+			}
+			boolean ok = clouddisc$notifyNameChanged(value);
+			if (!ok) {
+				Object menu = ((AbstractContainerScreen<?>) (Object) this).getMenu();
+				if (menu instanceof AnvilMenu anvil) {
+					anvil.setItemName(value);
+				}
+			}
+			clouddisc$pending = null;
+			CloudDiscClient.LOGGER.info("[CloudDisc] 铁砧回填落地 ✓「{}」改名框现在={} 原版路径={}",
+					value, this.name == null ? "?" : this.name.getValue(), ok);
+		} catch (Throwable t) {
+			CloudDiscClient.LOGGER.warn("[CloudDisc] 回填落地失败: {}", t.toString());
+		}
+	}
+
 	private static final int CD_GUI_W = 176;
 
 	@Unique
@@ -148,9 +199,9 @@ public abstract class AnvilScreenMixin {
 			NeteasePickerScreen.Pick pick = (id, display, voice) -> {
 				try {
 					String value = prefix + id;
-					if (this.name != null) {
-						this.name.setValue(value);                          // ① 只改显示（不改服务端 ✗）
-					}
+					// 选歌界面还开着 ⇒ 此刻写会被"返回时的界面重建"冲掉 ✗（实测 ✓）
+					// 所以只记下 ✓ 等回到铁砧、界面重建完成后再落地 ✓（clouddisc$applyPending ✓）
+					clouddisc$pending = value;
 					// ② ★ 必须走原版路径：更新菜单 + 把改名请求发给服务端 ✓
 					//    只 setValue 不触发 responder ✗ 服务端收不到 ⇒ 结果槽不重算 ⇒ 名字没变 ✓（实测症状 ✓）
 					boolean notified = clouddisc$notifyNameChanged(value);
@@ -176,6 +227,15 @@ public abstract class AnvilScreenMixin {
 		}
 	}
 
+	/** 每刻同步：按钮显隐跟着输入槽 ✓ 待填值一旦出现就落地 ✓。 */
+	@Inject(method = "containerTick", at = @At("TAIL"))
+	private void clouddisc$tick(CallbackInfo ci) {
+		try {
+			clouddisc$syncButton();
+			clouddisc$applyPending();
+		} catch (Throwable ignored) {
+		}
+	}
 	@Inject(method = "extractLabels", at = @At("TAIL"))
 	private void clouddisc$drawHint(GuiGraphicsExtractor g, int mouseX, int mouseY, CallbackInfo ci) {
 		try {
