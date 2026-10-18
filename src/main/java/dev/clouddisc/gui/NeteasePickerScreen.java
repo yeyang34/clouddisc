@@ -49,8 +49,10 @@ public class NeteasePickerScreen extends Screen {
 		void onPick(long id, String name, boolean voice);
 	}
 
-	private static final int[] TYPES = {NeteaseSearch.TYPE_SONG, NeteaseSearch.TYPE_VOICE};
-	private static final String[] TAB_NAMES = {"单曲", "声音(播客/电台)"};
+	/** 三个页签 ✓ 第三个是"整档电台"（type=1009 ✓ 选中后写的是电台 id ✓ 播放时从第一期开始 ✓）。 */
+	private static final int TYPE_RADIO = 1009;
+	private static final int[] TYPES = {NeteaseSearch.TYPE_SONG, NeteaseSearch.TYPE_VOICE, TYPE_RADIO};
+	private static final String[] TAB_NAMES = {"单曲", "声音(播客单集)", "电台(整档)"};
 
 	private static final int C_BG_BAND = 0xE6121215;
 	private static final int C_ACCENT = 0xFF4C8DFF;
@@ -215,6 +217,22 @@ public class NeteasePickerScreen extends Screen {
 			return;
 		}
 		NeteaseSearch.Item it = items.get(idx);
+		if ("radio".equals(it.kind())) {
+			lyricLines = List.of(
+					"【电台 · 整档】",
+					"",
+					"电台：" + it.name(),
+					it.artist().isBlank() ? "主播：（未知）" : ("主播：" + it.artist()),
+					"",
+					"确认后会写入  @" + it.id(),
+					"播放时从这档电台的【第一期】开始 ✓",
+					"（解析服务会自动把它落到第一期节目 ✓）",
+					"",
+					"提示：想听某一集，请切到【声音】页签搜那一集 ✓");
+			lyricScroll = 0;
+			lyricShownFor = it.id();
+			return;
+		}
 		if (it.isVoice()) {
 			lyricLines = List.of(
 					"【声音 · 播客/电台节目】",
@@ -376,7 +394,8 @@ public class NeteasePickerScreen extends Screen {
 				context.fill(listX - 3, y - 1, listX + listW + 3, y + rowH - 2, C_SEL);
 			}
 			NeteaseSearch.Item it = items.get(idx);
-			String mark = it.isVoice() ? "♪声音 " : "♫ ";
+			String mark = "radio".equals(it.kind()) ? "📻电台 "
+					: (it.isVoice() ? "♪声音 " : "♫ ");
 			String right = it.durationMs() > 0 ? mmss(it.durationMs()) : "";
 			int rightW = right.isEmpty() ? 0 : (right.length() * 5 + 8);
 			drawText(context, clip(mark + it.name(), Math.max(8, (listW - 12 - rightW) / 5)),
