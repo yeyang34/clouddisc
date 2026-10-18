@@ -17,6 +17,7 @@
     "SoundSystemMixin",
     "SoundLoaderMixin",
     "LivingEntityRendererMixin",
+		"AnvilScreenMixin",
     "AvatarRendererMixin"
   ],
   "injectors": {
