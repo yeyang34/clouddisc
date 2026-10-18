@@ -25,77 +25,73 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * 游戏内「网易云选歌」界面 ✓。
+ * 游戏内「网易云选歌」界面。
  *
- * <p>为什么不是真浏览器 ✗：嵌 Chromium 需要上百 MB 的 natives，26.2 上没有可用构建 ✓
- * 于是用原生界面做同一件事 ✓ 数据来自我们自己的解析服务 ✓（它背后是 NeteaseCloudMusicApi ✓）
+ * <p><b>一次搜索拿全部类型</b>：单曲 / 声音（播客单集）/ 电台（整档）由服务端一次返回
+ * （{@code types=1,2000,1009}），底部那排是<b>本地筛选</b>，切换不发请求——
+ * 这样"单曲里没找到还得去电台再搜一遍"的问题就没了。
  *
- * <p>功能：
- * <ul>
- *   <li>两个页签：<b>单曲</b> / <b>声音</b>（播客 / 电台节目 ✓）</li>
- *   <li>结果列表：滚轮 / ↑↓ / PgUp·PgDn / Home·End 都能翻 ✓ 鼠标点击直接选 ✓</li>
- *   <li>右侧详情：单曲显示<b>歌词</b>（客户端直连网易云歌词接口 ✓ 实测是明文 ✓）；
- *       声音显示主播 / 电台 / 时长 ✓</li>
- *   <li>底部 [确认] [取消]：确认把 id 回传给调用方 ✓（铁砧那边写成 {@code @<id>} ✓）</li>
- * </ul>
+ * <p>排版沿用配置文件界面那套暗色卡片风格：顶部标题带 + 主色细线、
+ * 卡片带描边、选中行左侧主色条、底部操作带。
  */
 @Environment(EnvType.CLIENT)
 public class NeteasePickerScreen extends Screen {
-	/** 选中后的回调 ✓ voice 表示它是不是"声音"（播客）✓。 */
+	/** 选中后的回调。 */
 	public interface Pick {
 		void onPick(long id, String name, boolean voice);
 	}
 
-	/** 三个页签 ✓ 第三个是"整档电台"（type=1009 ✓ 选中后写的是电台 id ✓ 播放时从第一期开始 ✓）。 */
-	private static final int TYPE_RADIO = 1009;
-	private static final int[] TYPES = {NeteaseSearch.TYPE_SONG, NeteaseSearch.TYPE_VOICE, TYPE_RADIO};
-	private static final String[] TAB_NAMES = {"单曲", "声音(播客单集)", "电台(整档)"};
-
+	// ---------------- 配色（与 CloudDiscConfigScreen 一致） ----------------
 	private static final int C_BG_BAND = 0xE6121215;
 	private static final int C_ACCENT = 0xFF4C8DFF;
 	private static final int C_CARD = 0xB01E1E22;
 	private static final int C_CARD_EDGE = 0x603A3A40;
-	private static final int C_SEL = 0x804C8DFF;
+	private static final int C_SEL = 0x664C8DFF;
 	private static final int C_TEXT = 0xFFE8E8F0;
 	private static final int C_DIM = 0xFF9A9AA8;
+	private static final int C_WARN = 0xFFFFC46B;
+
+	private static final String[] FILTERS = {"全部", "单曲", "声音", "电台"};
 
 	private final Screen parent;
 	private final Pick onPick;
 	private final CloudDiscConfig cfg;
 
-	private int tab = 0;
+	private int filter = 0;
 	private EditBox searchBox;
 	private Button confirmBtn;
 
-	private List<NeteaseSearch.Item> items = List.of();
+	private List<NeteaseSearch.Item> all = List.of();
+	private List<NeteaseSearch.Item> view = List.of();
 	private int selected = -1;
 	private int scroll = 0;
 	private String status = "输入歌名 / 歌手 / 播客名，回车或点【搜索】";
 	private boolean loading = false;
 	private long seq = 0L;
+	private String keyword = "";
 
 	private final Map<Long, List<String>> lyricCache = new HashMap<>();
 	private List<String> lyricLines = List.of();
 	private int lyricScroll = 0;
 	private long lyricShownFor = -1L;
 
-	// ---- 自适应布局 ----
-	private int tabY = 46;
-	private int tabH = 18;
-	private int searchY = 70;
+	// ---------------- 自适应布局 ----------------
+	private int headerH = 40;
+	private int searchY = 48;
+	private int chipsY = 72;
+	private int chipsH = 16;
+	private int bodyY = 94;
 	private int listX = 14;
-	private int listY = 96;
-	private int listW = 200;
-	private int listH = 120;
-	private int detailX = 220;
-	private int detailY = 96;
+	private int listW = 300;
+	private int detailX = 320;
 	private int detailW = 200;
-	private int detailH = 120;
-	private int rowH = 14;
-	private int visibleRows = 8;
+	private int bodyH = 150;
+	private int rowH = 15;
+	private int visibleRows = 9;
 
 	public NeteasePickerScreen(Screen parent, Pick onPick) {
 		super(Component.literal("网易云选歌"));
@@ -107,57 +103,55 @@ public class NeteasePickerScreen extends Screen {
 
 	private void computeLayout() {
 		int pad = 14;
-		int avail = Math.max(240, this.width - pad * 2);
-		tabY = 46;
-		searchY = 70;
-		listY = 96;
-		int bottomBand = 40;
-		listH = Math.max(40, this.height - listY - bottomBand - 6);
-		detailH = listH;
-		listW = Math.max(120, (int) (avail * 0.46));
+		int avail = Math.max(280, this.width - pad * 2);
+		headerH = 40;
+		searchY = 48;
+		chipsY = 72;
+		chipsH = 16;
+		bodyY = 94;
+		int bottom = 40;
+		bodyH = Math.max(54, this.height - bodyY - bottom - 6);
 		listX = pad;
+		listW = Math.max(140, (int) (avail * 0.58));
 		detailX = listX + listW + 8;
-		detailW = Math.max(100, this.width - pad - detailX);
-		detailY = listY;
-		rowH = 14;
-		visibleRows = Math.max(1, listH / rowH);
+		detailW = Math.max(90, this.width - pad - detailX);
+		rowH = 15;
+		visibleRows = Math.max(1, bodyH / rowH);
 	}
 
 	@Override
 	protected void init() {
 		computeLayout();
 		clearWidgets();
-		int fieldW = Math.max(80, listW - 60);
+		int btnW = 56;
+		int fieldW = Math.max(90, Math.min(listW - btnW - 8, 240));
 		searchBox = new EditBox(this.font, listX, searchY, fieldW, 18, Component.literal(""));
 		searchBox.setMaxLength(60);
-		searchBox.setValue(lastKeyword());
+		searchBox.setValue(keyword);
 		addRenderableWidget(searchBox);
 		addRenderableWidget(Button.builder(Component.literal("搜索"), b -> doSearch())
-				.bounds(listX + fieldW + 4, searchY, 52, 18).build());
+				.bounds(listX + fieldW + 6, searchY, btnW, 18).build());
 
 		int bw = 72;
 		int by = this.height - 28;
-		confirmBtn = Button.builder(Component.literal("确认"), b -> confirm()).bounds(
-				this.width - 14 - (bw * 2 + 6), by, bw, 20).build();
-		confirmBtn.visible = selected >= 0 && selected < items.size();
+		confirmBtn = Button.builder(Component.literal("确认"), b -> confirm())
+				.bounds(this.width - 14 - (bw * 2 + 6), by, bw, 20).build();
+		confirmBtn.visible = selected >= 0 && selected < view.size();
 		addRenderableWidget(confirmBtn);
 		addRenderableWidget(Button.builder(Component.literal("取消"), b -> onClose())
 				.bounds(this.width - 14 - bw, by, bw, 20).build());
 	}
 
-	private String lastKeyword = "";
-
-	private String lastKeyword() {
-		return lastKeyword;
-	}
+	// ---------------------------------------------------------------- 搜索
 
 	private void doSearch() {
 		if (searchBox != null) {
-			lastKeyword = searchBox.getValue();
+			keyword = searchBox.getValue();
 		}
 		loading = true;
 		status = "搜索中…";
-		items = List.of();
+		all = List.of();
+		view = List.of();
 		selected = -1;
 		scroll = 0;
 		lyricLines = List.of();
@@ -165,8 +159,7 @@ public class NeteasePickerScreen extends Screen {
 		lyricShownFor = -1L;
 		rebuildConfirm();
 		final long mySeq = ++seq;
-		final int type = TYPES[Math.max(0, Math.min(TYPES.length - 1, tab))];
-		NeteaseSearch.search(cfg, lastKeyword, type, 20).thenAccept(r -> {
+		NeteaseSearch.searchAll(cfg, keyword, 20).thenAccept(r -> {
 			Minecraft mc = Minecraft.getInstance();
 			if (mc == null) {
 				return;
@@ -177,14 +170,12 @@ public class NeteasePickerScreen extends Screen {
 				}
 				loading = false;
 				if (r.ok()) {
-					items = r.items();
-					selected = items.isEmpty() ? -1 : 0;
-					scroll = 0;
-					status = "共 " + items.size() + " 条（" + (r.via() == null ? "?" : r.via()) + "）"
-							+ (items.isEmpty() ? "" : "  回车确认 / 点选");
-					showLyricFor(0);
+					all = r.items();
+					applyFilter(0);
+					status = "共 " + all.size() + " 条 · 回车确认 / 双击选择";
 				} else {
-					items = List.of();
+					all = List.of();
+					view = List.of();
 					selected = -1;
 					status = r.error();
 				}
@@ -193,58 +184,84 @@ public class NeteasePickerScreen extends Screen {
 		});
 	}
 
+	private void applyFilter(int f) {
+		filter = Math.max(0, Math.min(FILTERS.length - 1, f));
+		List<NeteaseSearch.Item> v = new ArrayList<>();
+		for (NeteaseSearch.Item it : all) {
+			if (filter == 0) {
+				v.add(it);
+			} else if (filter == 1 && !it.isVoice() && !it.isRadio()) {
+				v.add(it);
+			} else if (filter == 2 && it.isVoice()) {
+				v.add(it);
+			} else if (filter == 3 && it.isRadio()) {
+				v.add(it);
+			}
+		}
+		view = v;
+		selected = v.isEmpty() ? -1 : 0;
+		scroll = 0;
+		lyricLines = List.of();
+		lyricScroll = 0;
+		lyricShownFor = -1L;
+		if (selected >= 0) {
+			showDetailFor(0);
+		}
+		rebuildConfirm();
+	}
+
 	private void rebuildConfirm() {
 		if (confirmBtn != null) {
-			confirmBtn.visible = selected >= 0 && selected < items.size();
+			confirmBtn.visible = selected >= 0 && selected < view.size();
 		}
 	}
 
 	private void confirm() {
-		if (selected < 0 || selected >= items.size()) {
+		if (selected < 0 || selected >= view.size()) {
 			return;
 		}
-		NeteaseSearch.Item it = items.get(selected);
+		NeteaseSearch.Item it = view.get(selected);
 		if (onPick != null) {
-			onPick.onPick(it.id(), it.display(), it.isVoice());
+			onPick.onPick(it.id(), it.display(), it.isVoice() || it.isRadio());
 		}
 		onClose();
 	}
 
-	// ---------------------------------------------------------------- 歌词
+	// ---------------------------------------------------------------- 详情
 
-	private void showLyricFor(int idx) {
-		if (idx < 0 || idx >= items.size()) {
+	private void showDetailFor(int idx) {
+		if (idx < 0 || idx >= view.size()) {
 			return;
 		}
-		NeteaseSearch.Item it = items.get(idx);
-		if ("radio".equals(it.kind())) {
+		NeteaseSearch.Item it = view.get(idx);
+		if (it.isRadio()) {
 			lyricLines = List.of(
 					"【电台 · 整档】",
 					"",
-					"电台：" + it.name(),
+					it.name(),
 					it.artist().isBlank() ? "主播：（未知）" : ("主播：" + it.artist()),
 					"",
-					"确认后会写入  @" + it.id(),
-					"播放时从这档电台的【第一期】开始 ✓",
-					"（解析服务会自动把它落到第一期节目 ✓）",
+					"写入：@" + it.id(),
+					"播放时从这档电台的【第一期】开始",
 					"",
-					"提示：想听某一集，请切到【声音】页签搜那一集 ✓");
+					"想听某一集，切到【声音】筛选里找那一集",
+					"");
 			lyricScroll = 0;
 			lyricShownFor = it.id();
 			return;
 		}
 		if (it.isVoice()) {
 			lyricLines = List.of(
-					"【声音 · 播客/电台节目】",
+					"【声音 · 播客/电台单集】",
 					"",
-					"标题：" + it.name(),
+					it.name(),
 					it.artist().isBlank() ? "主播：（未知）" : ("主播：" + it.artist()),
-					it.album().isBlank() ? "" : ("电台：" + it.album()),
 					"",
-					"确认后会写入  @" + it.id(),
-					"游戏内可直接播放 ✓（解析服务会把它落到对应的音频 ✓）",
+					"写入：@" + it.id(),
+					"游戏内可直接播放",
 					"",
-					"提示：播客通常没有歌词，这里是节目信息 ✓");
+					"提示：播客通常没有歌词，这里是节目信息",
+					"");
 			lyricScroll = 0;
 			lyricShownFor = it.id();
 			return;
@@ -256,18 +273,31 @@ public class NeteasePickerScreen extends Screen {
 			lyricShownFor = it.id();
 			return;
 		}
-		lyricLines = List.of("（歌词加载中…）");
+		List<String> head = new ArrayList<>();
+		head.add(it.name());
+		head.add(it.artist().isBlank() ? "（未知歌手）" : it.artist());
+		if (!it.album().isBlank()) {
+			head.add("专辑：" + it.album());
+		}
+		head.add("写入：@" + it.id());
+		head.add("");
+		head.add("—— 歌词 ——");
+		head.add("");
+		lyricLines = head;
 		lyricScroll = 0;
 		lyricShownFor = it.id();
 		final long id = it.id();
+		final List<String> headCopy = new ArrayList<>(head);
 		Thread t = new Thread(() -> {
 			List<String> lines = fetchLyric(id);
+			List<String> merged = new ArrayList<>(headCopy);
+			merged.addAll(lines);
 			Minecraft mc = Minecraft.getInstance();
 			if (mc != null) {
 				mc.execute(() -> {
-					lyricCache.put(id, lines);
+					lyricCache.put(id, merged);
 					if (lyricShownFor == id) {
-						lyricLines = lines;
+						lyricLines = merged;
 						lyricScroll = 0;
 					}
 				});
@@ -282,7 +312,7 @@ public class NeteasePickerScreen extends Screen {
 			.connectTimeout(Duration.ofSeconds(8))
 			.build();
 
-	/** 直连网易云歌词接口（实测是明文 JSON ✓ 无需签名 ✓）。 */
+	/** 直连网易云歌词接口（实测明文 JSON，无需签名）。 */
 	private static List<String> fetchLyric(long id) {
 		try {
 			HttpRequest req = HttpRequest.newBuilder(
@@ -295,8 +325,8 @@ public class NeteasePickerScreen extends Screen {
 			if (resp.statusCode() / 100 != 2) {
 				return List.of("（歌词获取失败：HTTP " + resp.statusCode() + "）");
 			}
-			String body = new String(resp.body(), StandardCharsets.UTF_8);
-			JsonObject o = JsonParser.parseString(body).getAsJsonObject();
+			JsonObject o = JsonParser.parseString(new String(resp.body(), StandardCharsets.UTF_8))
+					.getAsJsonObject();
 			String raw = "";
 			if (o.has("lrc") && o.get("lrc").isJsonObject()) {
 				JsonObject lrc = o.getAsJsonObject("lrc");
@@ -305,7 +335,7 @@ public class NeteasePickerScreen extends Screen {
 				}
 			}
 			if (raw.isBlank()) {
-				return List.of("（这首歌没有歌词 ✓ 不影响播放）");
+				return List.of("（这首歌没有歌词，不影响播放）");
 			}
 			List<String> out = new ArrayList<>();
 			for (String line : raw.split("\n")) {
@@ -325,16 +355,17 @@ public class NeteasePickerScreen extends Screen {
 
 	// ---------------------------------------------------------------- 绘制
 
-	private void drawText(GuiGraphicsExtractor ctx, String text, int x, int y, int color) {
+	private void draw(GuiGraphicsExtractor ctx, String text, int x, int y) {
 		try {
 			ctx.textRenderer().accept(x, y, Component.literal(text == null ? "" : text));
 		} catch (Throwable ignored) {
 		}
 	}
 
-	private void drawTextC(GuiGraphicsExtractor ctx, String text, int cx, int y) {
+	private void drawC(GuiGraphicsExtractor ctx, String text, int cx, int y) {
 		try {
-			ctx.textRenderer().accept(TextAlignment.CENTER, cx, y, Component.literal(text == null ? "" : text));
+			ctx.textRenderer().accept(TextAlignment.CENTER, cx, y,
+					Component.literal(text == null ? "" : text));
 		} catch (Throwable ignored) {
 		}
 	}
@@ -348,91 +379,119 @@ public class NeteasePickerScreen extends Screen {
 
 	private static String mmss(long ms) {
 		if (ms <= 0) {
-			return "--:--";
+			return "";
 		}
 		long s = ms / 1000L;
-		return String.format("%d:%02d", s / 60, s % 60);
+		return String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60);
+	}
+
+	/** 按字符数裁宽度（界面里只用等宽近似 ✓ 够用）。 */
+	private static String fit(String s, int px) {
+		return clip(s, Math.max(4, px / 6));
 	}
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
 		context.fill(0, 0, this.width, this.height, 0x40000000);
-		context.fill(0, 0, this.width, 40, C_BG_BAND);
-		context.fill(0, 39, this.width, 41, C_ACCENT);
+		// 顶部标题带
+		context.fill(0, 0, this.width, headerH, C_BG_BAND);
+		context.fill(0, headerH - 2, this.width, headerH - 1, C_ACCENT);
+		draw(context, "☁ 网易云选歌", listX, 12);
+		draw(context, fit(status, Math.max(120, this.width - 260)), this.width - 14 - Math.min(420, this.width / 2), 12);
 
-		// 页签
-		int avail = this.width - 28;
-		int tw = Math.max(60, (avail - 8) / TAB_NAMES.length);
-		for (int i = 0; i < TAB_NAMES.length; i++) {
-			int x = 14 + i * (tw + 8);
-			boolean on = i == tab;
-			context.fill(x, tabY, x + tw, tabY + tabH, on ? C_SEL : C_CARD);
-			context.fill(x, tabY, x + tw, tabY + 1, C_CARD_EDGE);
-			context.fill(x, tabY + tabH - 2, x + tw, tabY + tabH, on ? C_ACCENT : C_CARD_EDGE);
-			drawText(context, TAB_NAMES[i], x + 6, tabY + 5, on ? C_TEXT : C_DIM);
+		// 本地筛选 chips
+		int x = listX;
+		for (int i = 0; i < FILTERS.length; i++) {
+			int count = 0;
+			for (NeteaseSearch.Item it : all) {
+				if (i == 0
+						|| (i == 1 && !it.isVoice() && !it.isRadio())
+						|| (i == 2 && it.isVoice())
+						|| (i == 3 && it.isRadio())) {
+					count++;
+				}
+			}
+			String label = FILTERS[i] + (i == 0 ? "" : " " + count);
+			int cw = Math.max(44, label.length() * 6 + 14);
+			boolean on = i == filter;
+			context.fill(x, chipsY, x + cw, chipsY + chipsH, on ? C_SEL : C_CARD);
+			context.fill(x, chipsY, x + cw, chipsY + 1, C_CARD_EDGE);
+			context.fill(x, chipsY + chipsH - 2, x + cw, chipsY + chipsH, on ? C_ACCENT : C_CARD_EDGE);
+			draw(context, label, x + 7, chipsY + 4);
+			x += cw + 6;
 		}
-		drawText(context, clip("网易云选歌 · " + status, Math.max(20, (this.width - 28) / 6)),
-				this.width - 14 - Math.min(360, (this.width - 28) / 2), 56 - 40 + 30, C_DIM);
 
-		// 结果列表卡片
-		context.fill(listX - 3, listY - 3, listX + listW + 3, listY + listH + 3, C_CARD);
-		context.fill(listX - 3, listY - 3, listX + listW + 3, listY - 2, C_CARD_EDGE);
-		context.fill(listX - 3, listY + listH + 2, listX + listW + 3, listY + listH + 3, C_CARD_EDGE);
+		// 结果卡片
+		context.fill(listX - 3, bodyY - 3, listX + listW + 3, bodyY + bodyH + 3, C_CARD);
+		context.fill(listX - 3, bodyY - 3, listX + listW + 3, bodyY - 2, C_CARD_EDGE);
+		context.fill(listX - 3, bodyY + bodyH + 2, listX + listW + 3, bodyY + bodyH + 3, C_CARD_EDGE);
 		if (loading) {
-			drawText(context, "搜索中…", listX + 6, listY + 6, C_DIM);
-		} else if (items.isEmpty()) {
-			drawText(context, "（没有结果）", listX + 6, listY + 6, C_DIM);
+			draw(context, "搜索中…", listX + 6, bodyY + 6);
+		} else if (view.isEmpty()) {
+			draw(context, all.isEmpty() ? "（还没有结果，先在上面搜索）" : "（这个筛选下没有结果）",
+					listX + 6, bodyY + 6);
 		}
 		for (int r = 0; r < visibleRows; r++) {
 			int idx = scroll + r;
-			if (idx >= items.size()) {
+			if (idx >= view.size()) {
 				break;
 			}
-			int y = listY + r * rowH;
+			int y = bodyY + r * rowH;
 			boolean sel = idx == selected;
+			NeteaseSearch.Item it = view.get(idx);
 			if (sel) {
 				context.fill(listX - 3, y - 1, listX + listW + 3, y + rowH - 2, C_SEL);
+				context.fill(listX - 3, y - 1, listX - 1, y + rowH - 2, C_ACCENT);
 			}
-			NeteaseSearch.Item it = items.get(idx);
-			String mark = "radio".equals(it.kind()) ? "📻电台 "
-					: (it.isVoice() ? "♪声音 " : "♫ ");
-			String right = it.durationMs() > 0 ? mmss(it.durationMs()) : "";
-			int rightW = right.isEmpty() ? 0 : (right.length() * 5 + 8);
-			drawText(context, clip(mark + it.name(), Math.max(8, (listW - 12 - rightW) / 5)),
-					listX + 3, y, sel ? 0xFFFFFFFF : C_TEXT);
-			if (!right.isEmpty()) {
-				drawText(context, right, listX + listW - rightW, y, C_DIM);
+			// 类型标签（固定宽度列 ✓ 排版整齐）
+			String tag = "[" + it.kindLabel() + "]";
+			draw(context, tag, listX + 4, y);
+			int tagW = tag.length() * 6 + 6;
+			// 名字 + 歌手
+			String dur = mmss(it.durationMs());
+			int durW = dur.isEmpty() ? 0 : 42;
+			int nameW = listW - tagW - durW - 14;
+			String line = it.name();
+			if (!it.artist().isBlank()) {
+				line = line + "  ·  " + it.artist();
+			}
+			draw(context, fit(line, nameW), listX + 4 + tagW, y);
+			if (!dur.isEmpty()) {
+				drawC(context, dur, listX + listW - 6, y);
 			}
 		}
-		// 滚动条
-		if (items.size() > visibleRows) {
-			int barH = Math.max(10, listH * visibleRows / items.size());
-			int barY = listY + (listH - barH) * scroll / Math.max(1, items.size() - visibleRows);
-			context.fill(listX + listW, barY, listX + listW + 2, barY + barH, C_ACCENT);
+		if (view.size() > visibleRows) {
+			int barH = Math.max(10, bodyH * visibleRows / view.size());
+			int barY = bodyY + (bodyH - barH) * scroll / Math.max(1, view.size() - visibleRows);
+			context.fill(listX + listW + 1, barY, listX + listW + 3, barY + barH, C_ACCENT);
 		}
 
 		// 详情卡片
-		context.fill(detailX - 3, detailY - 3, detailX + detailW + 3, detailY + detailH + 3, C_CARD);
-		context.fill(detailX - 3, detailY - 3, detailX + detailW + 3, detailY - 2, C_CARD_EDGE);
-		context.fill(detailX - 3, detailY + detailH + 2, detailX + detailW + 3, detailY + detailH + 3, C_CARD_EDGE);
-		int chars = Math.max(8, (detailW - 8) / 5);
-		int lines = Math.max(1, detailH / 11);
+		context.fill(detailX - 3, bodyY - 3, detailX + detailW + 3, bodyY + bodyH + 3, C_CARD);
+		context.fill(detailX - 3, bodyY - 3, detailX + detailW + 3, bodyY - 2, C_CARD_EDGE);
+		context.fill(detailX - 3, bodyY + bodyH + 2, detailX + detailW + 3, bodyY + bodyH + 3, C_CARD_EDGE);
+		int chars = Math.max(6, (detailW - 8) / 6);
+		int lines = Math.max(1, bodyH / 11);
 		for (int i = 0; i < lines; i++) {
 			int li = lyricScroll + i;
 			if (li >= lyricLines.size()) {
 				break;
 			}
-			drawText(context, clip(lyricLines.get(li), chars), detailX + 3, detailY + 2 + i * 11, C_TEXT);
+			draw(context, clip(lyricLines.get(li), chars), detailX + 3, bodyY + 2 + i * 11);
 		}
 		if (lyricLines.size() > lines) {
-			drawText(context, (lyricScroll + 1) + "/" + Math.max(1, lyricLines.size() - lines + 1),
-					detailX + detailW - 40, detailY + detailH - 12, C_DIM);
+			drawC(context, (lyricScroll + 1) + "/" + Math.max(1, lyricLines.size() - lines + 1),
+					detailX + detailW - 16, bodyY + bodyH - 11);
 		}
 
-		// 底部带
+		// 底部操作带
 		context.fill(0, this.height - 40, this.width, this.height, C_BG_BAND);
 		context.fill(0, this.height - 41, this.width, this.height - 40, C_CARD_EDGE);
-		drawText(context, "选中的 id 会写成  @<id>  ✓  铁砧里拿取唱片即完成", 14, this.height - 24, C_DIM);
+		draw(context, "↑↓ 选择 · Enter 确认 · Tab 换筛选 · Esc 取消", listX, this.height - 24);
+		if (selected >= 0 && selected < view.size()) {
+			NeteaseSearch.Item it = view.get(selected);
+			draw(context, fit("将写入：@" + it.id(), 220), listX, this.height - 13);
+		}
 		super.extractRenderState(context, mouseX, mouseY, delta);
 	}
 
@@ -442,14 +501,14 @@ public class NeteasePickerScreen extends Screen {
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
 		try {
 			boolean inDetail = mouseX >= detailX - 3 && mouseX <= detailX + detailW + 3
-					&& mouseY >= detailY - 3 && mouseY <= detailY + detailH + 3;
+					&& mouseY >= bodyY - 3 && mouseY <= bodyY + bodyH + 3;
 			if (inDetail) {
-				int lines = Math.max(1, detailH / 11);
+				int lines = Math.max(1, bodyH / 11);
 				int max = Math.max(0, lyricLines.size() - lines);
 				lyricScroll = scrollY < 0 ? Math.min(max, lyricScroll + 1) : Math.max(0, lyricScroll - 1);
 				return true;
 			}
-			int max = Math.max(0, items.size() - visibleRows);
+			int max = Math.max(0, view.size() - visibleRows);
 			scroll = scrollY < 0 ? Math.min(max, scroll + 1) : Math.max(0, scroll - 1);
 			return true;
 		} catch (Throwable t) {
@@ -462,7 +521,7 @@ public class NeteasePickerScreen extends Screen {
 		int k = event.key();
 		try {
 			if (k == GLFW.GLFW_KEY_ENTER || k == GLFW.GLFW_KEY_KP_ENTER) {
-				if (selected >= 0 && selected < items.size()) {
+				if (selected >= 0 && selected < view.size()) {
 					confirm();
 				} else {
 					doSearch();
@@ -495,12 +554,11 @@ public class NeteasePickerScreen extends Screen {
 					return true;
 				}
 				if (k == GLFW.GLFW_KEY_END) {
-					select(items.size() - 1);
+					select(view.size() - 1);
 					return true;
 				}
 				if (k == GLFW.GLFW_KEY_TAB) {
-					tab = (tab + 1) % TAB_NAMES.length;
-					doSearch();
+					applyFilter((filter + 1) % FILTERS.length);
 					return true;
 				}
 			}
@@ -511,18 +569,17 @@ public class NeteasePickerScreen extends Screen {
 	}
 
 	private void move(int d) {
-		if (items.isEmpty()) {
+		if (view.isEmpty()) {
 			return;
 		}
-		int n = Math.max(0, Math.min(items.size() - 1, selected + d));
-		select(n);
+		select(Math.max(0, Math.min(view.size() - 1, selected + d)));
 	}
 
 	private void select(int idx) {
-		if (items.isEmpty()) {
+		if (view.isEmpty()) {
 			return;
 		}
-		int n = Math.max(0, Math.min(items.size() - 1, idx));
+		int n = Math.max(0, Math.min(view.size() - 1, idx));
 		boolean changed = n != selected;
 		selected = n;
 		if (selected < scroll) {
@@ -533,7 +590,7 @@ public class NeteasePickerScreen extends Screen {
 		}
 		rebuildConfirm();
 		if (changed) {
-			showLyricFor(selected);
+			showDetailFor(selected);
 		}
 	}
 
@@ -542,24 +599,31 @@ public class NeteasePickerScreen extends Screen {
 		try {
 			double mx = event.x();
 			double my = event.y();
-			// 页签
-			int avail = this.width - 28;
-			int tw = Math.max(60, (avail - 8) / TAB_NAMES.length);
-			for (int i = 0; i < TAB_NAMES.length; i++) {
-				int x = 14 + i * (tw + 8);
-				if (mx >= x && mx < x + tw && my >= tabY && my < tabY + tabH) {
-					if (tab != i) {
-						tab = i;
-						doSearch();
+			// 筛选 chips
+			int x = listX;
+			for (int i = 0; i < FILTERS.length; i++) {
+				int count = 0;
+				for (NeteaseSearch.Item it : all) {
+					if (i == 0
+							|| (i == 1 && !it.isVoice() && !it.isRadio())
+							|| (i == 2 && it.isVoice())
+							|| (i == 3 && it.isRadio())) {
+						count++;
 					}
+				}
+				String label = FILTERS[i] + (i == 0 ? "" : " " + count);
+				int cw = Math.max(44, label.length() * 6 + 14);
+				if (mx >= x && mx < x + cw && my >= chipsY && my < chipsY + chipsH) {
+					applyFilter(i);
 					return true;
 				}
+				x += cw + 6;
 			}
 			// 列表行
-			if (mx >= listX - 3 && mx <= listX + listW + 3 && my >= listY && my <= listY + listH) {
-				int r = (int) ((my - listY) / rowH);
+			if (mx >= listX - 3 && mx <= listX + listW + 3 && my >= bodyY && my <= bodyY + bodyH) {
+				int r = (int) ((my - bodyY) / rowH);
 				int idx = scroll + r;
-				if (idx >= 0 && idx < items.size()) {
+				if (idx >= 0 && idx < view.size()) {
 					select(idx);
 					if (doubleClick) {
 						confirm();
