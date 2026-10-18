@@ -159,6 +159,9 @@ public final class Acoustics {
 		float occlusionAcc;
 		/** 0.12.6 诊断：主射线之外的 8 条偏移射线里，有几条"通透"（≤ {@link #OPEN_PATH_OCC}）。 */
 		int lastOpenPaths;
+	/** Valve 门道模型：上次算路径的刻 + 结果 ✓（每 5 刻重算一次 ✓） */
+	long pathLenTick = Long.MIN_VALUE;
+	int lastPathLenValue = -1;
 		/** 0.12.6 诊断：本轮实际用的遮挡陡度 k（= 配置值 x 强度）。 */
 		float lastK;
 		/** 0.12.6 诊断：主射线（未放宽）的遮挡值，用来对比"放宽了多少"。 */
@@ -537,17 +540,23 @@ public final class Acoustics {
 			// 【0.12.65】"声路"覆盖：若存在一条可走过去的路线（半径内 BFS 可达），
 			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
 			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
-			int pathLen = roomPathLength(world, jukebox, ear); // 【0.12.69】Valve 式：房间连通域路径
+			// 【节流】双向泛洪不便宜 ✓ 每 5 刻重算一次 ✓ 结果缓存进 State ✓
+			int pathLen;
+			if (st.pathLenTick != Long.MIN_VALUE && nowTick - st.pathLenTick < 5L) {
+				pathLen = st.lastPathLenValue;
+			} else {
+				pathLen = roomPathLength(world, jukebox, ear); // 【Valve 门道模型】空气连通域路径 ✓
+				st.pathLenTick = nowTick;
+				st.lastPathLenValue = pathLen;
+			}
 			if (pathLen > 0) {
 				double straight = Math.max(0.5, center.distanceTo(ear));
 				double detour = Math.max(0.0, pathLen / straight - 1.0);
-				// 【0.12.70】Valve 语义：一旦空气连通（有开口），就【完全按房间路径】决定衰减，
-				// 不再把"直线上的方块"那一刀算进来（之前用封顶，一根柱子仍会 -10 dB，反直觉）。
-				// 加法映射：绕行比每多 1 倍距离 → 遮挡 +0.35。
-				//   一根 1 格方块（绕 2 格 / 7 格，detour≈0.29）→ occ≈0.12 → 高频仅 -5 dB（几乎听不出）
-				//   绕房子半圈（detour≈2）→ occ≈0.72 → 明显闷
+				// 绕行比 → 等效遮挡：绕 1 格几乎无感 ✓ 绕半圈才明显 ✓
 				double f = 0.02 + 0.35 * detour;
-				// 用房间路径结果【替换】（而非在材质遮挡上封顶）：这是 Valve 模型的核心
+				// 【修】空气连通（门 / 窗 / 墙上方绕过去）⇒ 音色不该被压暗 ✓
+				// 用户实测：砌一堵墙但【墙上方是通的】⇒ 声音明明绕得过去 ⇒ 必须算"通" ✓
+				f = Math.min(f, 0.15);
 				occ = Math.min(occ, f);
 			}
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
@@ -1503,8 +1512,8 @@ public final class Acoustics {
 			if (ddx * ddx + ddy * ddy + ddz * ddz > 48 * 48) {
 				return -1;
 			}
-			java.util.HashMap<BlockPos, Integer> a = floodAir(world, from, 2200);
-			java.util.HashMap<BlockPos, Integer> b = floodAir(world, to, 2200);
+			java.util.HashMap<BlockPos, Integer> a = floodAir(world, from, 8000);
+			java.util.HashMap<BlockPos, Integer> b = floodAir(world, to, 8000);
 			int best = Integer.MAX_VALUE;
 			for (java.util.Map.Entry<BlockPos, Integer> e : a.entrySet()) {
 				Integer other = b.get(e.getKey());
@@ -1533,7 +1542,7 @@ public final class Acoustics {
 		while (!queue.isEmpty() && dist.size() < cap) {
 			BlockPos p = queue.poll();
 			int d = dist.get(p);
-			if (d >= 32) {
+			if (d >= 96) {   // 【修】原来 32 太浅 ✗（>16 格或有绕行就两端碰不上 ⇒ pathLen=-1 ⇒ 门道模型完全不参与 ✓）
 				continue;
 			}
 			for (int i = 0; i < 6; i++) {
