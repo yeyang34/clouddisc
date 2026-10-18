@@ -61,6 +61,16 @@ public final class CloudDiscClient implements ClientModInitializer {
 				}
 			}
 			LOGGER.info("[CloudDisc] 混入自检: 生物渲染注入={} ✓（彩蛋果冻）", jelly);
+			// 【铁砧选歌】也必须自检 ✓：只要有一个 @Shadow 解析失败，整个 mixin 会被拒 ✗（已经踩过一次 ✓）
+			Class<?> anvil = Class.forName("net.minecraft.client.gui.screens.inventory.AnvilScreen");
+			boolean anvilOk = false;
+			for (java.lang.reflect.Method m : anvil.getDeclaredMethods()) {
+				if (m.getName().contains("clouddisc$addPickButton")
+						|| m.getName().contains("clouddisc$addWidgetReflect")) {
+					anvilOk = true;
+				}
+			}
+			LOGGER.info("[CloudDisc] 混入自检: 铁砧选歌注入={} ✓（这项为 false 就是 mixin 被拒 ✗ 把日志发我 ✓）", anvilOk);
 			LOGGER.info("[CloudDisc] 彩蛋说明: 播放 @3438848556 时，唱片机 10 格内的生物会变成果冻；停止播放立即消失 ✓");
 		} catch (Throwable t) {
 			LOGGER.warn("[CloudDisc] 混入自检异常: {}", t.toString());
