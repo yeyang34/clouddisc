@@ -60,7 +60,8 @@ public final class HudStatus {
 	}
 
 	/** 逐字符上色。{@code style == -1} 时是流动的彩虹。 */
-	private static Component colorize(String text, int style) {
+	/** 逐字符上色。{@code style == -1} 时是流动的彩虹。 */
+	static Component colorize(String text, int style) {
 		MutableComponent out = Component.literal("");
 		long now = System.currentTimeMillis();
 		for (int i = 0; i < text.length(); i++) {

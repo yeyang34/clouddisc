@@ -24,7 +24,7 @@ public final class CloudDiscConfig {
 	 * 新版本把默认值改成 true 之后，老用户仍然读到 false，表现为"功能像没实现"。
 	 * 有了版本号就能在老配置上做一次迁移。
 	 */
-	public static final int CURRENT_VERSION = 9;
+	public static final int CURRENT_VERSION = 11;
 
 	private static CloudDiscConfig instance;
 
@@ -236,12 +236,32 @@ public final class CloudDiscConfig {
 	public boolean biliEnabled = true;
 
 	/**
-	 * 播放时把<b>当前这句网易云歌词</b>打到屏幕下方那行状态栏（默认关）。
-	 * <p>就是"正在播放: xxx"那行的位置 —— 开了之后会变成「♪ 当前歌词」，
+	 * 界面背景铺一张<b>随机二次元壁纸</b>（默认开）。
+	 * <p>图片来自 UApiPro 的 {@code /api/v1/random/image}；下载后缓存到
+	 * {@code config/clouddisc/wallpaper.img}，默认 6 小时换一张。
+	 * <p>接口挂了 / 断网 / 图片解不出来 都只是"没有背景"，界面照常显示深色底 ✓
+	 */
+	public boolean acgWallpaper = true;
+
+	/** 壁纸接口地址（返回 image/* 即可，不限于 UApiPro）。 */
+	public String acgWallpaperUrl = "https://uapis.cn/api/v1/random/image?category=acg&type=pc";
+	/**
+	 * 壁纸怎么铺（默认 0）。
+	 * <ul>
+	 *   <li>{@code 0} = <b>填满裁切</b>（cover）：不留黑边，但窗口不是 16:9 时会裁掉边</li>
+	 *   <li>{@code 1} = <b>完整显示</b>（contain）：能看到整张图，四周留黑边</li>
+	 * </ul>
+	 * 接口返回的图本身是 16:9（实测 1920×1080 / 2048×1152），所以默认按 16:9 居中裁一次再铺。
+	 */
+	public int wallpaperFit = 0;
+
+	/**
+	 * 播放时把<b>当前这句网易云歌词</b>打到屏幕下方的动作栏（默认<b>开</b>）。
+	 * <p>就是原来「正在播放: xxx」那个位置 —— 开了之后会变成「♪ 当前歌词」，
 	 * 每换一句才刷新，不影响播放、失败也不影响。
 	 * <p>只对<b>纯数字 id</b>的网易云曲目有效（B 站/本地文件没有歌词接口）。
 	 */
-	public boolean hudLyrics = false;
+	public boolean hudLyrics = true;
 
 	/**
 	 * 状态栏歌词的颜色样式（只作用于歌词，其它状态行始终白色）。
@@ -253,6 +273,17 @@ public final class CloudDiscConfig {
 	 * 原版没有"彩虹"格式，彩虹是逐字符换色模拟的；配置界面里用一个色板循环来选。
 	 */
 	public int lyricStyle = 0;
+
+	/**
+	 * 状态栏歌词显示什么（动作栏只有一行，所以只能三选一）。
+	 * <ul>
+	 *   <li>{@code 0} = <b>原文</b>（默认）</li>
+	 *   <li>{@code 1} = <b>译文</b>（没有翻译时自动退回原文，不会空着）</li>
+	 *   <li>{@code 2} = <b>原文 ｜ 译文</b>（同一行；外语歌才有译文）</li>
+	 * </ul>
+	 * 译文来自歌词接口的 {@code tlyric} 轨，只有外语歌才有；中文歌一律显示原文 ✓
+	 */
+	public int lyricDisplay = 0;
 
 	/**
 	 * B 站解析服务的基址（默认<b>留空</b> = 复用 {@link #neteaseEndpoint} 那台服务，换个路由）。
@@ -387,6 +418,7 @@ public final class CloudDiscConfig {
 			}
 		}
 		// v9（26.2 状态栏歌词）新增 hudLyrics / lyricStyle —— 同上，重写一遍让新键现身。
+		// v10 新增 hudLyricsTranslation（歌词翻译行）。
 		configVersion = CURRENT_VERSION;
 	}
 

@@ -56,6 +56,8 @@ public final class JukeboxSession {
 	public long hudSampleBytes;
 	/** 状态栏歌词：当前显示的那一句（只有变化时才刷新，避免每刻重写） */
 	public String hudLyricText;
+	/** 状态栏歌词：当前实际写进动作栏的那一行（原文/译文/两者，用来判断要不要重写） */
+	public String hudLyricTextShown;
 
 	// 本地播放资源
 	public Identifier streamId;

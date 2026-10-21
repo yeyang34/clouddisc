@@ -795,8 +795,8 @@ public final class PlaybackController {
 			if (id <= 0L) {
 				return; // 只有网易云（纯数字 id）才有歌词；B站/本地文件没有
 			}
-			java.util.List<dev.clouddisc.music.Lyrics.Line> lines = dev.clouddisc.music.Lyrics.cachedOrFetch(id);
-			if (lines == null || lines.isEmpty()) {
+			dev.clouddisc.music.Lyrics.Both both = dev.clouddisc.music.Lyrics.bothOrFetch(id);
+			if (both == null || both.orig().isEmpty()) {
 				return;
 			}
 			long posRaw = s.msAtStart + (nowTick - s.startedTick) * 50L;
@@ -811,25 +811,41 @@ public final class PlaybackController {
 					pos = Math.floorMod(posRaw, dur);
 				}
 			}
-			String text = dev.clouddisc.music.Lyrics.lineAt(lines, pos);
+			String text = dev.clouddisc.music.Lyrics.lineAt(both.orig(), pos);
+			// 翻译轨有自己的时间戳，所以用同一个时刻单独查一次（不能拿原文的索引去套）
+			CloudDiscConfig trCfg = CloudDiscClient.config();
+			// 译文轨用自己的时间戳单独查一次（不贵：一次二分）
+			String trans = dev.clouddisc.music.Lyrics.lineAt(both.trans(), pos);
 			// 排障用：开着 physicsSoundDebug 时每 5 秒打一条，出了问题一眼能看出是"位置算错"还是"查不到句"
 			try {
-				CloudDiscConfig dbgCfg = CloudDiscClient.config();
-				if (dbgCfg != null && dbgCfg.physicsSoundDebug && nowTick % 100L == 0L) {
-					CloudDiscClient.LOGGER.info("[CloudDisc] 歌词: 原始位置={}ms 取模后={}ms 循环长度={}ms 句数={} 显示={}",
-							posRaw, pos, dur, lines.size(), text == null ? "(空)" : text);
+				if (trCfg != null && trCfg.physicsSoundDebug && nowTick % 100L == 0L) {
+					CloudDiscClient.LOGGER.info("[CloudDisc] 歌词: 原始位置={}ms 取模后={}ms 循环长度={}ms 原文句数={} 翻译句数={} 显示={} / 译={}",
+							posRaw, pos, dur, both.orig().size(), both.trans().size(),
+							text == null ? "(空)" : text, trans == null ? "(无)" : trans);
 				}
 			} catch (Throwable ignored) {
 			}
 			if (text == null || text.isBlank()) {
 				return;
 			}
-			boolean changed = !text.equals(s.hudLyricText);
+			// 只用动作栏一行：按 lyricDisplay 决定显示原文 / 译文 / 两者
 			s.hudLyricText = text;
+			int mode = trCfg == null ? 0 : trCfg.lyricDisplay;
+			String show;
+			if (mode == 1) {
+				// 只显示译文：没有翻译就退回原文，别让屏幕上出现空行
+				show = (trans != null && !trans.isBlank()) ? trans : text;
+			} else if (mode == 2) {
+				show = (trans != null && !trans.isBlank()) ? (text + " ｜ " + trans) : text;
+			} else {
+				show = text;
+			}
+			boolean changed = !show.equals(s.hudLyricTextShown);
+			s.hudLyricTextShown = show;
 			// 彩虹是【流动】的：同一句也要不断重写上色，否则会定格成一个静态渐变
 			boolean animate = style == -1;
 			if (changed || animate || nowTick % 10L == 0L) {
-				dev.clouddisc.gui.HudStatus.showStyled("♪ " + text, style);
+				dev.clouddisc.gui.HudStatus.showStyled("♪ " + show, style);
 			}
 		} catch (Throwable ignored) {
 			// 歌词失败不影响播放

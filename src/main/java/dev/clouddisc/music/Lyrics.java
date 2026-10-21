@@ -40,6 +40,15 @@ public final class Lyrics {
 	public record Line(long atMs, String text) {
 	}
 
+	/**
+	 * 一首歌的两条轨。
+	 * <p>接口同时返回 {@code lrc}（原文）与 {@code tlyric}（翻译，外语歌才有）。
+	 * 两轨<b>各有自己的时间戳</b>，所以必须分别解析、分别查句 —— 不能拿原文的索引去套翻译 ✗
+	 */
+	public record Both(List<Line> orig, List<Line> trans) {
+		public static final Both EMPTY = new Both(List.of(), List.of());
+	}
+
 	private static final HttpClient HTTP = HttpClient.newBuilder()
 			.followRedirects(HttpClient.Redirect.NORMAL)
 			.connectTimeout(Duration.ofSeconds(8))
@@ -55,10 +64,10 @@ public final class Lyrics {
 	 */
 	private static final int CACHE_MAX = 24;
 
-	private static final Map<Long, List<Line>> CACHE =
-			java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<Long, List<Line>>(32, 0.75f, true) {
+	private static final Map<Long, Both> CACHE =
+			java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<Long, Both>(32, 0.75f, true) {
 				@Override
-				protected boolean removeEldestEntry(Map.Entry<Long, List<Line>> eldest) {
+				protected boolean removeEldestEntry(Map.Entry<Long, Both> eldest) {
 					return size() > CACHE_MAX;
 				}
 			});
@@ -74,11 +83,11 @@ public final class Lyrics {
 	 * 取歌词：命中缓存直接返回；没有就触发一次后台拉取并返回 {@code null}。
 	 * <p>调用方每 tick 调也不怕 —— 拉取有去重（{@link #TRIED}）✓
 	 */
-	public static List<Line> cachedOrFetch(long id) {
+	public static Both bothOrFetch(long id) {
 		if (id <= 0L) {
 			return null;
 		}
-		List<Line> hit = CACHE.get(id);
+		Both hit = CACHE.get(id);
 		if (hit != null) {
 			return hit;
 		}
@@ -86,10 +95,12 @@ public final class Lyrics {
 			TRIED.clear(); // 只是"别重复请求"的备忘录，清掉最多多请求一次，不心疼
 		}
 		if (TRIED.add(id)) {
-			CompletableFutureLite.run(() -> {
-				List<Line> lines = fetch(id);
-				CACHE.put(id, lines == null ? List.of() : lines);
-			});
+			Thread t = new Thread(() -> {
+				Both v = fetch(id);
+				CACHE.put(id, v == null ? Both.EMPTY : v);
+			}, "CloudDisc-Lyrics");
+			t.setDaemon(true);
+			t.start();
 		}
 		return null;
 	}
@@ -124,8 +135,8 @@ public final class Lyrics {
 		return null;
 	}
 
-	/** 同步拉取（在后台线程里跑）。失败返回空列表。 */
-	private static List<Line> fetch(long id) {
+	/** 同步拉取（在后台线程里跑）。失败返回 {@link Both#EMPTY}。 */
+	private static Both fetch(long id) {
 		try {
 			HttpRequest req = HttpRequest.newBuilder(
 							URI.create("https://music.163.com/api/song/lyric?id=" + id + "&lv=1&kv=1&tv=-1"))
@@ -135,20 +146,25 @@ public final class Lyrics {
 					.GET().build();
 			HttpResponse<byte[]> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
 			if (resp.statusCode() / 100 != 2) {
-				return List.of();
+				return Both.EMPTY;
 			}
 			JsonObject o = JsonParser.parseString(new String(resp.body(), StandardCharsets.UTF_8)).getAsJsonObject();
-			String raw = "";
-			if (o.has("lrc") && o.get("lrc").isJsonObject()) {
-				JsonObject lrc = o.getAsJsonObject("lrc");
-				if (lrc.has("lyric") && !lrc.get("lyric").isJsonNull()) {
-					raw = lrc.get("lyric").getAsString();
-				}
-			}
-			return parse(raw);
+			return new Both(parse(trackText(o, "lrc")), parse(trackText(o, "tlyric")));
 		} catch (Throwable t) {
-			return List.of();
+			return Both.EMPTY;
 		}
+	}
+
+	/** 从响应里取某条轨的原始 LRC 文本（{@code lrc} 原文 / {@code tlyric} 翻译）。 */
+	private static String trackText(JsonObject o, String key) {
+		if (!o.has(key) || !o.get(key).isJsonObject()) {
+			return "";
+		}
+		JsonObject tr = o.getAsJsonObject(key);
+		if (!tr.has("lyric") || tr.get("lyric").isJsonNull()) {
+			return "";
+		}
+		return tr.get("lyric").getAsString();
 	}
 
 	/** 解析 LRC。一行可能有多个时间标签（{@code [00:10.00][01:20.00]副歌}）⇒ 拆成多条。 */
@@ -198,14 +214,5 @@ public final class Lyrics {
 		}
 		Collections.sort(out, (a, b) -> Long.compare(a.atMs(), b.atMs()));
 		return out;
-	}
-
-	/** 极简"后台跑一下"，避免为一行歌词引入 Executor 的生命周期管理。 */
-	private static final class CompletableFutureLite {
-		static void run(Runnable r) {
-			Thread t = new Thread(r, "CloudDisc-Lyrics");
-			t.setDaemon(true);
-			t.start();
-		}
 	}
 }

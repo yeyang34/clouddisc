@@ -49,20 +49,21 @@ public class NeteasePickerScreen extends Screen {
 	}
 
 	// ---------------- 配色（与 CloudDiscConfigScreen 一致） ----------------
-	private static final int C_BG_BAND = 0xE6121215;
-	private static final int C_ACCENT = 0xFF4C8DFF;
-	private static final int C_CARD = 0xB01E1E22;
-	private static final int C_CARD_EDGE = 0x603A3A40;
-	private static final int C_SEL = 0x664C8DFF;
-	private static final int C_TEXT = 0xFFE8E8F0;
-	private static final int C_DIM = 0xFF9A9AA8;
+	private static final int C_BG_BAND = dev.clouddisc.gui.Palette.SURFACE_ALT;
+	private static final int C_ACCENT = dev.clouddisc.gui.Palette.ACCENT;
+	private static final int C_CARD = dev.clouddisc.gui.Palette.SURFACE;
+	private static final int C_CARD_EDGE = dev.clouddisc.gui.Palette.BORDER;
+	private static final int C_SEL = 0x664C8DFF; // 选中行：主色半透明
+	private static final int C_TEXT = dev.clouddisc.gui.Palette.TEXT;
+	private static final int C_DIM = dev.clouddisc.gui.Palette.TEXT_DIM;
 	private static final int C_WARN = 0xFFFFC46B;
 
-	private static final String[] FILTERS = {"全部", "单曲", "声音", "电台", "收藏", "历史", "B站"};
+	// 顺序：网易云的类型在前，然后 B 站，最后是本地记录（收藏/历史）—— 数据来源由近到远
+	private static final String[] FILTERS = {"全部", "单曲", "声音", "电台", "B站", "收藏", "历史"};
 	// 前 4 个来自搜索结果；收藏/历史来自本地文件；B站来自解析服务（断网时前 4 个和收藏/历史仍可用）✓
-	private static final int F_FAV = 4;
-	private static final int F_HISTORY = 5;
-	private static final int F_BILI = 6;
+	private static final int F_BILI = 4;
+	private static final int F_FAV = 5;
+	private static final int F_HISTORY = 6;
 	/** 行首星标列的宽度（点这一列 = 切换收藏，不触发选中）。 */
 	private static final int STAR_W = 11;
 
@@ -92,6 +93,9 @@ public class NeteasePickerScreen extends Screen {
 
 	// ---------------- 自适应布局 ----------------
 	private int headerH = 40;
+	/** 换壁纸按钮（每帧按 loading 状态换字/禁用）。 */
+	private Button wallpaperBtn;
+
 	private int searchY = 48;
 	private int chipsY = 72;
 	private int chipsH = 16;
@@ -134,8 +138,18 @@ public class NeteasePickerScreen extends Screen {
 	protected void init() {
 		computeLayout();
 		clearWidgets();
+		// 背景壁纸：复用配置界面那张（同一个纹理，不重复下载）
+		dev.clouddisc.gui.Wallpaper.ensure();
 		int btnW = 56;
 		int fieldW = Math.max(90, Math.min(listW - btnW - 8, 240));
+		// 【换壁纸】标题带右侧，和配置界面同一个位置
+		wallpaperBtn = Button.builder(Component.literal("换壁纸"), b -> {
+			b.setMessage(Component.literal("换壁纸中…"));
+			b.active = false;
+			dev.clouddisc.gui.Wallpaper.refresh();
+			dev.clouddisc.gui.HudStatus.show("正在换壁纸…");
+		}).bounds(this.width - 14 - 66, 12, 60, 18).build();
+		addRenderableWidget(wallpaperBtn);
 		searchBox = new EditBox(this.font, listX, searchY, fieldW, 18, Component.literal(""));
 		searchBox.setMaxLength(60);
 		searchBox.setValue(keyword);
@@ -145,12 +159,14 @@ public class NeteasePickerScreen extends Screen {
 
 		int bw = 72;
 		int by = this.height - 28;
+		// 【只互换位置】主操作「确认」放到最右、次要「取消」在其左 —— 这是通用惯例，
+		// 手滑关掉界面（原来最右是取消）也不再发生。尺寸/高度/右边距全部保持原样。
 		confirmBtn = Button.builder(Component.literal("确认"), b -> confirm())
-				.bounds(this.width - 14 - (bw * 2 + 6), by, bw, 20).build();
+				.bounds(this.width - 14 - bw, by, bw, 20).build();
 		confirmBtn.visible = selected >= 0 && selected < view.size() && view.get(selected).playable();
 		addRenderableWidget(confirmBtn);
 		addRenderableWidget(Button.builder(Component.literal("取消"), b -> onClose())
-				.bounds(this.width - 14 - bw, by, bw, 20).build());
+				.bounds(this.width - 14 - (bw * 2 + 6), by, bw, 20).build());
 	}
 
 	// ---------------------------------------------------------------- 搜索
@@ -567,7 +583,12 @@ public class NeteasePickerScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-		context.fill(0, 0, this.width, this.height, 0x40000000);
+		if (wallpaperBtn != null) {
+			boolean busy = dev.clouddisc.gui.Wallpaper.isLoading();
+			wallpaperBtn.setMessage(Component.literal(busy ? "换壁纸中…" : "换壁纸"));
+			wallpaperBtn.active = !busy;
+		}
+		dev.clouddisc.gui.Wallpaper.render(context, this.width, this.height);
 		// 顶部标题带
 		context.fill(0, 0, this.width, headerH, C_BG_BAND);
 		context.fill(0, headerH - 2, this.width, headerH - 1, C_ACCENT);
