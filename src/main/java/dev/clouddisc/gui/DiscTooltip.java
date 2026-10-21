@@ -69,14 +69,19 @@ public final class DiscTooltip {
 			return;
 		}
 		// 纯数字 id ⇒ 一定是网易云曲目 ✓（defaultProvider 可能是 local ✗ 那样解析不出来 ✓）
+		// BV 开头 ⇒ 一定是 B 站 ✓（两者互斥：网易云要求"以数字开头"）
+		boolean bili = dev.clouddisc.music.BiliProvider.looksLikeBili(q.trackId().trim());
 		String provider;
-		if (q.provider() != null) {
+		if (bili) {
+			provider = "bili";
+		} else if (q.provider() != null) {
 			provider = q.provider();
 		} else if (q.trackId().trim().matches("\\d{1,12}")) {
 			provider = "netease";
 		} else {
 			provider = cfg == null ? "netease" : cfg.defaultProvider;
 		}
+		String brand = bili ? "B站" : "网易云";
 		String key = provider + "|" + q.trackId();
 
 		// 用户自己写的备注（@186016（晴天）⇒ 晴天 ✓）
@@ -87,9 +92,9 @@ public final class DiscTooltip {
 
 		String cached = CACHE.get(key);
 		if (cached != null) {
-			lines.add(Component.literal("网易云：" + cached).withStyle(ChatFormatting.AQUA));
+			lines.add(Component.literal(brand + "：" + cached).withStyle(ChatFormatting.AQUA));
 		} else {
-			lines.add(Component.literal("网易云：解析中…").withStyle(ChatFormatting.DARK_GRAY));
+			lines.add(Component.literal(brand + "：解析中…").withStyle(ChatFormatting.DARK_GRAY));
 			startResolve(provider, q.trackId(), key, cfg);
 		}
 	}

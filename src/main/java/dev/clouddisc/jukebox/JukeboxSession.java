@@ -49,6 +49,13 @@ public final class JukeboxSession {
 	public long startedTick = -1L;
 	public long msAtStart;
 	public boolean originator;
+	/** 历史记录：这次播放是否已经记过（seek/重连会再次走到"开声"，别记重复）。 */
+	public boolean historyLogged;
+	/** 屏幕下方状态提示的采样点（算下载速率用）。 */
+	public long hudSampleMs;
+	public long hudSampleBytes;
+	/** 状态栏歌词：当前显示的那一句（只有变化时才刷新，避免每刻重写） */
+	public String hudLyricText;
 
 	// 本地播放资源
 	public Identifier streamId;

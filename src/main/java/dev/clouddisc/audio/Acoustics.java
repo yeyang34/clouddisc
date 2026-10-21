@@ -6,6 +6,8 @@ import dev.clouddisc.CloudDiscConfig;
 // [26.2] accessor 暂缓（Source/Channel 体系变了）
 // [26.2] accessor 暂缓（Source/Channel 体系变了）
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.audio.Channel;
 import net.minecraft.client.resources.sounds.SoundInstance;
@@ -104,6 +106,27 @@ public final class Acoustics {
 	private static final int OPEN_PATHS_MIN = 1;
 	private static final int OPEN_PATHS_MAX = 9;
 
+	// ---------------------------------------------------------------- 【门道模型】参数
+	// 对标 Wwise Spatial Audio「Rooms & Portals」：
+	//   AkPropagationPathInfo.gain  = "沿途所有传送门的累积增益"
+	//   uMaxSoundPropagationDepth   = "声音最多能穿过几个房间"
+	// 我们不去建完整的房间图（体素世界里建图更贵），而是直接在"空气最短路径"上数窄颈：
+	//   一个窄颈 = 一个传送门（门/门洞/走廊口），穿过几个就衰减几档。
+	/** 第一道门的基础遮挡：0.15 ≈ 保持原来"开门通透"的听感，老用户不会觉得退化。 */
+	private static final double DOORWAY_BASE_OCC = 0.15;
+	/** 门道深度上限（Wwise 的 uMaxSoundPropagationDepth）：超过就按上限算，不再累加。 */
+	private static final int DOORWAY_MAX_DEPTH = 3;
+	/** 遮挡上限：门道再多也不至于"完全听不见"（闷 ≠ 没声）。 */
+	private static final double DOORWAY_MAX_OCC = 0.85;
+	/** 判"窄颈"的横向宽度上限（格）：1 格门、2 格走廊算门道；3 格以上算开阔。 */
+	private static final int DOORWAY_MAX_WIDTH = 2;
+	/** 判"门/走廊"的头顶净空上限（格）：门 2 格高；露天/天井没有上限 ⇒ 不算门。 */
+	private static final int DOORWAY_MAX_HEADROOM = 2;
+	/** 看"两侧有没有被墙夹住"时，朝每侧最多探几格。 */
+	private static final int DOORWAY_FLANK_SCAN = 4;
+	/** 窄颈段达到这个长度，就当"窄走廊"⇒ 两端各一道门（2 道）。 */
+	private static final int DOORWAY_LONG_RUN = 4;
+
 	private static final double AIR_START = 12.0;
 	/** 沿连线最多穿过多少格（性能上限）。
 	 * <p>注意这是"<b>格子数</b>"不是"格数"：斜射一条 20 格的线最多会穿过 3x20 个格子，
@@ -162,6 +185,10 @@ public final class Acoustics {
 	/** Valve 门道模型：上次算路径的刻 + 结果 ✓（每 5 刻重算一次 ✓） */
 	long pathLenTick = Long.MIN_VALUE;
 	int lastPathLenValue = -1;
+	/** 【门道模型】上次算"空气路径 + 门道数"的刻与结果（与 pathLen 用同一个缓存格）。 */
+	long doorwayTick = Long.MIN_VALUE;
+	int lastDoorways;
+	AirPath lastAirPath = AirPath.BLOCKED;
 		/** 0.12.6 诊断：本轮实际用的遮挡陡度 k（= 配置值 x 强度）。 */
 		float lastK;
 		/** 0.12.6 诊断：主射线（未放宽）的遮挡值，用来对比"放宽了多少"。 */
@@ -458,6 +485,30 @@ public final class Acoustics {
 			// 【0.12.54】9 条射线里最小遮挡（绕射：走最好走的那条路）
 			double bestOffset = Double.MAX_VALUE;
 		double occ = occMain;
+		// ===== 【门道模型】先算"穿了几道门" =====
+		// 为什么放在射线判定【外面】：门道是【空气路径】的属性和主射线通不通无关。
+		// 你的户型里大门 → 客厅 → 卧室门很可能恰好在一条直线上（主射线完全通畅，occMain=0），
+		// 若把这段塞进下面的 if 里，那种"门洞对齐"的房子会完全不受影响 —— 等于没改。
+		int doorways = -1;
+		double occDoor = -1.0;
+		boolean doorModel = doorwayModel();
+		if (doorModel) {
+			AirPath ap = cachedAirPath(st, world, jukebox, ear, nowTick);
+			if (ap.length > 0) {
+				doorways = Math.max(0, Math.min(DOORWAY_MAX_DEPTH, ap.doorways));
+				if (doorways > 0) {
+					double straight = Math.max(0.5, center.distanceTo(ear));
+					double detour = Math.max(0.0, ap.length / straight - 1.0);
+					// 累积衰减：第一道门 0.15，之后每多一道 +physicsDoorwayStep（默认 0.20）
+					occDoor = DOORWAY_BASE_OCC + doorwayStep() * (doorways - 1);
+					// 绕行再加一点点：门上绕远路时混响占比上升、直通更暗（封顶 0.10，别盖过门道本身的量）
+					occDoor += Math.min(0.10, 0.03 * detour);
+					occDoor = Math.min(occDoor, DOORWAY_MAX_OCC);
+				} else {
+					occDoor = 0.0; // 连通但没有门道（直通 / 墙顶上方绕过 / 一根柱子）⇒ 不闷 ✓
+				}
+			}
+		}
 		if (!strictOcclusion() && occMain > 0.0) {
 			// 只要主射线被挡就试 8 个对角偏移；主射线本来就通透时遮挡必然是 0，不用白算。
 			// 注意：这里不再取最小值，而是"数通路"——见方法注释与 MAX_RELAX。
@@ -514,50 +565,62 @@ public final class Acoustics {
 			// 【0.12.54】采用"最通畅那条路"的遮挡：门开着 / 有小缝 → 声音从那里过去 ✓
 
 			double fracBlocked = 1.0 - (openPaths / 8.0);
-			occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
-			// ===== 【空气连通 ⇒ 不闷】（用户实测：贴着唱片机放个铁砧就把主射线挡住 ✗ 空气明明四处都通 ✓）=====
-			// 判据只用【空气连通性】✗ 不看"中间那一格是谁" ✓：
-			//   8 条偏移射线里 ≥3 条通透 ⇒ 声音明显绕得过去 ⇒ 遮挡压到 0.05（≈ -26 dB 高频以下 ✓ 听感几乎无变化 ✓）
-			//   完全不连通（贴脸整面墙 / 封闭小屋无门）⇒ 通透 ≈ 0 ⇒ 保持上面的材质遮挡 ⇒ 该闷的仍然闷 ✓
-			// 开关：physicsOpenAirRelax（默认 true ✓ 关掉即回到原算法 ✓）
-			{
+			if (!doorModel) {
+				// 【旧】"按被挡射线占比软衰减"：只要偏移射线里有几条通，就把材质遮挡打折。
+				// 这和"空气连通就清亮"是同一族的兜底，会把门道数算出来的 0.35 又抹回 0，
+				// 所以门道模型开启时它必须让位（见下面 occDoor 的落地）。
+				occ = occMain * Math.pow(Math.max(0.0, Math.min(1.0, fracBlocked)), 1.5);
+			}
+			// ===== 【门道模型】Wwise「Rooms & Portals」：穿几道门，就闷几档 =====
+			// 这一节取代了原来的两条"只要空气连通就压到 0.05 / 0.15"的规则。
+			// 那两条的毛病（用户实测）：它们只看【通不通】，不看【穿了几道门】——
+			// "屋子外面 → 客厅"和"屋子外面 → 客厅 → 没门的内间"算出来是同一个数 ⇒ 内间也清亮 ✗。
+			// 现在的语义：
+			//   0 道门（直通 / 从墙顶上方绕过去 / 一根柱子）⇒ occ=0，保持清亮 ✓（用户明确要保留）
+			//   1 道门（外面 → 客厅，隔一道门道）    ⇒ 0.15，略暗，仍是"清亮"档 ✓（不倒退）
+			//   2 道门（外面 → 客厅 → 卧室）          ⇒ 0.35，明显暗一档，"有些闷" ✓
+			//   3 道门                              ⇒ 0.55；再多按 3 算（Wwise 的深度上限）
+			// 空气根本不连通的（封死的房间）不进来这条分支 ⇒ 走上面的材质遮挡，比 2 道门更闷 ✓
+			// 具体数在射线判定之前就算好了（见上面 doorways / occDoor），这里只落地 ✓
+			if (occDoor >= 0.0) {
+				occ = Math.min(occ, occDoor);
+			}
+			// 【回归保险】旧兜底"空气连通就不闷"：门道模型下它只在【找不到空气路径】时才允许生效
+			// （超距 64 格 / 超探索上限 / 地形太绕）。有它兜着，"室外一根柱子挡住视线"绝不会
+			// 因为 A* 没搜到而变闷 —— 这正是 1.1.1 之前用户反复反馈的老毛病。
+			if (openPaths >= 3 && (!doorModel || occDoor < 0.0)) {
 				CloudDiscConfig cfgOa = CloudDiscConfig.get();
-				if ((cfgOa == null || cfgOa.physicsOpenAirRelax) && openPaths >= 3) {
+				if (cfgOa == null || cfgOa.physicsOpenAirRelax) {
 					occ = Math.min(occ, 0.05);
 				}
 			}
-			// ===== 【26.2 · 方案乙】紧贴实心隔断的另一侧，不做"最通畅路"清零 =====
-			// 场景：唱片机上方封严，听者就站在屋顶上（声源→听者连线近似垂直）。
-			//   实测 [M7]：主射线遮挡=2.000（屋顶确实被射线打到）✗ 但 通透通路=8/8 ✗
-			//   → 8 条水平偏移射线从屋顶侧边飞出去 → fracBlocked=0 → occ=0 → 不闷 ✗
-			// 物理上"声音确实会绕屋顶边缘上来"，但听感上应是"隔着屋顶很闷"。
-			// 判据：主射线被实心挡（≥1.0）＋ 8 条全通 ＋ 双方很近（≤6 格，绕行不占主导）
-			//   → 认为是"紧贴隔断的另一侧"，采用主射线遮挡（打 0.85 折，保留侧向绕射的贡献）。
-			// 注意：这是【26.2 移植期针对该场景的最小改动】，0.12.x/0.13.x 原算法不含此分支。
-			if (openPaths >= 8 && occMain >= 1.0 && dist <= 6.0) {
+			if (!doorModel && openPaths >= 8 && occMain >= 1.0 && dist <= 6.0) {
+				// 【26.2 · 方案乙】紧贴实心隔断的另一侧（人站在屋顶上）不做"最通畅路"清零。
+				// 开门道模型后不需要它了：屋顶是实心 ⇒ 空气泛洪过不去 ⇒ 自然走材质遮挡 ✓
+				occ = occMain * 0.85;
+			} else if (doorModel && occDoor < 0.0 && openPaths >= 8 && occMain >= 1.0 && dist <= 6.0) {
+				// 门道模型下"找不到空气路径"时，上面那条旧兜底会把"站在屋顶上"重新判成通透 ——
+				// 这是 1.1.1 已经修好的 bug，不能因为兜底而复发 ⇒ 在无路径的情况下把这条规则补回来 ✓
 				occ = occMain * 0.85;
 			}
-			// 【0.12.65】"声路"覆盖：若存在一条可走过去的路线（半径内 BFS 可达），
-			// 就按【绕行比】决定最终遮挡 —— 绕 2 格 ≈ 几乎无影响，绕 1 倍距离 ≈ 打三折多。
-			// 不可达（pathLen<0）= 只能穿墙 → 保持上面的材质遮挡（明显闷）。
-			// 【节流】双向泛洪不便宜 ✓ 每 5 刻重算一次 ✓ 结果缓存进 State ✓
-			int pathLen;
-			if (st.pathLenTick != Long.MIN_VALUE && nowTick - st.pathLenTick < 5L) {
-				pathLen = st.lastPathLenValue;
-			} else {
-				pathLen = roomPathLength(world, jukebox, ear); // 【Valve 门道模型】空气连通域路径 ✓
-				st.pathLenTick = nowTick;
-				st.lastPathLenValue = pathLen;
-			}
-			if (pathLen > 0) {
-				double straight = Math.max(0.5, center.distanceTo(ear));
-				double detour = Math.max(0.0, pathLen / straight - 1.0);
-				// 绕行比 → 等效遮挡：绕 1 格几乎无感 ✓ 绕半圈才明显 ✓
-				double f = 0.02 + 0.35 * detour;
-				// 【修】空气连通（门 / 窗 / 墙上方绕过去）⇒ 音色不该被压暗 ✓
-				// 用户实测：砌一堵墙但【墙上方是通的】⇒ 声音明明绕得过去 ⇒ 必须算"通" ✓
-				f = Math.min(f, 0.15);
-				occ = Math.min(occ, f);
+			if (!doorModel) {
+				// 【0.12.65】旧"声路"覆盖：按绕行比决定遮挡，硬顶 0.15。
+				// 这条就是"绕多远都封在 0.15"的来源，已被门道计数取代 ✓
+				int pathLen;
+				if (st.pathLenTick != Long.MIN_VALUE && nowTick - st.pathLenTick < 5L) {
+					pathLen = st.lastPathLenValue;
+				} else {
+					pathLen = roomPathLength(world, jukebox, ear);
+					st.pathLenTick = nowTick;
+					st.lastPathLenValue = pathLen;
+				}
+				if (pathLen > 0) {
+					double straight = Math.max(0.5, center.distanceTo(ear));
+					double detour = Math.max(0.0, pathLen / straight - 1.0);
+					double f = 0.02 + 0.35 * detour;
+					f = Math.min(f, 0.15);
+					occ = Math.min(occ, f);
+				}
 			}
 			// 【0.12.32】按用户思路：真正决定"闷不闷"的是【声源/听者是否处在封闭空间】，
 			// 而不是"中间隔没隔东西"。树、一格高方块、栅栏这类小障碍不该闷（声音会绕过去）。
@@ -585,6 +648,14 @@ public final class Acoustics {
 				st.smoothOccTick = nowTick;
 				occ = st.smoothOcc;
 			}
+		} else if (occDoor > 0.0 && doorways >= 2) {
+			// ===== 主射线【完全通畅】但门道 ≥2（典型：大门 → 客厅 → 卧室门 恰好排成一条直线）=====
+			// 这种情况上面整段都没跑（occMain=0 就提前跳过了偏移射线与平滑），
+			// 若不在这里补一刀，"门洞对齐"的房子会听不出任何区别 —— 等于白改。
+			// 分寸：官方语义里一道门洞≈几乎无损失（用户也说"隔一个门道听，清澈，没错"），
+			// 所以只对 ≥2 道门生效，1 道门保持完全清亮 ✓
+			// 【注意】这里是【赋值】不是 min：occ 此刻就是 occMain=0，取 min 等于什么都没做。
+			occ = occDoor;
 		}
 		st.lastOccMain = (float) occMain;
 		st.lastOpenPaths = openPaths;
@@ -605,11 +676,15 @@ public final class Acoustics {
 		int backPaths = listenerPathsTo(world, ear, center, jukebox);
 		// 【0.12.61】边缘绕射：朝挡路方块的角发专门射线（"声音拐弯"的物理机制）
 		int edgePaths = edgePathsTo(world, ear, center, jukebox);
-		if (edgePaths > 0) {
+		// 【门道模型】这两个"绕射/反射兜底"封顶在旧算法里是把"声音绕过去了"折算回清亮的手段；
+		// 开门道模型后，绕过去这件事已经由【门道计数】表达（0 道门 ⇒ 本就 occ=0），
+		// 再在这里封顶会把"穿两道门"从 0.35 又拉回 0.25 ⇒ 内间不够闷 ✗，所以让它让位。
+		boolean clampByDetour = !doorwayModel();
+		if (clampByDetour && edgePaths > 0) {
 			// 绕射比镜面反射多损失一些能量（Maekawa 低频渐近约 5 dB），所以封顶比 0.25 松一点
 			occ = Math.min(occ, 0.45);
 		}
-		if (rr.earReach > 0 || backPaths > 0) {
+		if (clampByDetour && (rr.earReach > 0 || backPaths > 0)) {
 			// 【0.12.59】关键修正：声音是【绕过去/反射过去】的，直线路径上那堵墙根本不该算进去 ✗。
 			// 之前用 occ *= 0.15 缩放：当直线遮挡累积到 2~3 时，剩 0.3~0.45 → 高频仍被削 -17 dB ✗
 			// （实测"躲在石柱后还是那个吊样"）。改成【绝对封顶】：
@@ -1470,6 +1545,28 @@ public final class Acoustics {
 	}
 
 	/**
+	 * 该格算不算"空气能过"（门道模型专用，比 {@link #freeAt} 多认一种情况：<b>开着的门</b>）。
+	 * <p>为什么必须多这一条：{@code getCollisionShape().isEmpty()} 对<b>开着</b>的门也是 false
+	 * （门板转到侧面贴住门框，仍有碰撞盒），于是泛洪根本进不去带门的房间，
+	 * 连带"门开着的房间"会被当成封死 —— 那是另一个方向的错判。
+	 * <p>关着的门仍然切断体积（该闷就闷 ✓）。
+	 */
+	private static boolean airCell(Level world, BlockPos p) {
+		if (freeAt(world, p)) {
+			return true;
+		}
+		try {
+			BlockState bs = world.getBlockState(p);
+			if (bs.getBlock() instanceof DoorBlock) {
+				return bs.getValue(BlockStateProperties.OPEN);
+			}
+		} catch (Throwable ignored) {
+			// 属性不存在 / 取不到 → 保守当实心
+		}
+		return false;
+	}
+
+	/**
 	 * 【0.12.67】"声音能走过去吗"的严格判定（业界用导航网格，我们用它近似）：
 	 * 1) 本格与头顶一格都必须无碰撞（有净空）；2) 下方必须有支撑，或再下一格有支撑（= 上 1 格台阶）。
 	 * 这样"从墙头上方/屋顶上方的空气绕过去"就不成立（上一版正因为把空气当可通行，
@@ -1565,6 +1662,255 @@ public final class Acoustics {
 		return cfg != null && cfg.physicsSoundDirection;
 	}
 
+	// ================================================================ 【门道模型】Wwise「Rooms & Portals」
+
+	/**
+	 * 门道模型总开关（配置 {@code physicsDoorwayModel}，默认开）。
+	 * <p>对标 Wwise Spatial Audio：官方把「房间图 + 传送门」做成引擎特性 ——
+	 * {@code AkPropagationPathInfo.gain} 是"沿途所有传送门的累积增益"，
+	 * {@code uMaxSoundPropagationDepth} 是"声音最多能穿过几个房间"。
+	 * <p>我们<b>不建完整房间图</b>（体素世界里建图很贵，而且用户要的是"还原现象"、不是"适配某种户型"），
+	 * 而是直接在【唱片机 → 耳朵】的空气最短路径上数"窄颈"当传送门：
+	 * 等价、便宜、和房子什么形状无关 ✓
+	 */
+	private static boolean doorwayModel() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		return cfg == null || cfg.physicsDoorwayModel;
+	}
+
+	/** 每多穿一道门的额外遮挡（配置 {@code physicsDoorwayStep}，默认 0.20）。 */
+	private static double doorwayStep() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		double v = cfg == null ? 0.20 : cfg.physicsDoorwayStep;
+		return Math.max(0.0, Math.min(0.60, v));
+	}
+
+	/** 判"窄颈"的横向宽度上限（配置 {@code physicsDoorwayMaxWidth}，默认 2 格）。 */
+	private static int doorwayMaxWidth() {
+		CloudDiscConfig cfg = CloudDiscClient.config();
+		int v = cfg == null ? DOORWAY_MAX_WIDTH : cfg.physicsDoorwayMaxWidth;
+		return Math.max(1, Math.min(6, v));
+	}
+
+	/** 空气路径的查询结果：长度格数（-1=空气不通）、途经门道数、逐格坐标。 */
+	private static final class AirPath {
+		static final AirPath BLOCKED = new AirPath(-1, 0, java.util.List.of());
+		final int length;
+		final int doorways;
+		final java.util.List<BlockPos> cells;
+
+		AirPath(int length, int doorways, java.util.List<BlockPos> cells) {
+			this.length = length;
+			this.doorways = doorways;
+			this.cells = cells;
+		}
+	}
+
+	/** 带 5 刻缓存的空气路径查询（双向泛洪/带 parent 的 BFS 都不便宜，别每刻算）。 */
+	private static AirPath cachedAirPath(State st, Level world, BlockPos from, Vec3 ear, long nowTick) {
+		if (st.doorwayTick != Long.MIN_VALUE && nowTick - st.doorwayTick < 5L) {
+			return st.lastAirPath;
+		}
+		AirPath ap = airPath(world, from, ear);
+		st.doorwayTick = nowTick;
+		st.lastAirPath = ap;
+		st.pathLenTick = nowTick;
+		st.lastPathLenValue = ap.length;
+		st.lastDoorways = ap.doorways;
+		return ap;
+	}
+
+	/** 曼哈顿距离：6 邻域、单步代价 1 的可采纳启发（A* 用）。 */
+	private static int manhattan(BlockPos p, int x, int y, int z) {
+		return Math.abs(p.getX() - x) + Math.abs(p.getY() - y) + Math.abs(p.getZ() - z);
+	}
+
+	/**
+	 * 求"唱片机 → 耳朵"的空气最短路径，并在路上【数门道】。
+	 * <p>为什么不用 {@link #roomPathLength} 那双向泛洪：它只回答"通不通"，拿不到路径 ——
+	 * 也就数不出"穿了几道门"，而"穿几道门"正是听感分档的唯一依据（Wwise 的 gain 累积）。
+	 */
+	private static AirPath airPath(Level world, BlockPos from, Vec3 ear) {
+		try {
+			BlockPos to = BlockPos.containing(ear.x, ear.y, ear.z);
+			int ddx = from.getX() - to.getX();
+			int ddy = from.getY() - to.getY();
+			int ddz = from.getZ() - to.getZ();
+			if (ddx * ddx + ddy * ddy + ddz * ddz > 64 * 64) {
+				return AirPath.BLOCKED; // 太远不做（A* 很便宜，放宽到 64 格）
+			}
+			if (from.equals(to)) {
+				return new AirPath(0, 0, java.util.List.of(from));
+			}
+			final int[] DX = {1, -1, 0, 0, 0, 0};
+			final int[] DY = {0, 0, 1, -1, 0, 0};
+			final int[] DZ = {0, 0, 0, 0, 1, -1};
+			// ===== A*，不是纯 BFS =====
+			// 【实测踩到的坑，别再退回去】纯 BFS 在开阔地是按【球面】铺开的：
+			//   8000 格的探索上限只够铺到半径 ~12 格（4/3πr³ < 8000 ⇒ r ≈ 12.4）。
+			//   ⇒ 室外站在 15 格外就永远"走不到"听者 ⇒ 判成"空气不通" ⇒ 退回材质遮挡
+			//   ⇒ 复现"室外被一根柱子挡住就闷"的老毛病（用户实测反馈）。
+			// 旧代码用【双向泛洪求交集】绕过了这一点：两边各铺 12 格，只要两个球重叠就算通
+			//（所以它能撑到 ~24 格），但它拿不到路径、数不出门道。
+			// A* 带曼哈顿启发（6 邻域、单步代价 1，曼哈顿距离可采纳且一致），会朝听者直奔：
+			//   48 格开阔地只扩几百格，既准又不贵 ✓
+			int tx = to.getX();
+			int ty = to.getY();
+			int tz = to.getZ();
+			java.util.HashMap<BlockPos, Integer> gScore = new java.util.HashMap<>();   // 已走的步数
+			java.util.HashMap<BlockPos, Integer> fScore = new java.util.HashMap<>();   // g + 启发
+			java.util.HashMap<BlockPos, BlockPos> parent = new java.util.HashMap<>();
+			java.util.HashSet<BlockPos> closed = new java.util.HashSet<>();
+			java.util.PriorityQueue<BlockPos> open = new java.util.PriorityQueue<>((a, b) -> Integer.compare(
+					fScore.getOrDefault(a, Integer.MAX_VALUE), fScore.getOrDefault(b, Integer.MAX_VALUE)));
+			gScore.put(from, 0);
+			fScore.put(from, manhattan(from, tx, ty, tz));
+			open.add(from);
+			boolean found = false;
+			int expanded = 0;
+			final int maxExpanded = 6000; // 性能上限（迷宫里的最坏情况）；超出当不通，下面有旧兜底接手
+			final int maxDepth = 96;
+			while (!open.isEmpty() && expanded < maxExpanded) {
+				BlockPos p = open.poll();
+				if (closed.contains(p)) {
+					continue; // 优先队列里的过期条目（同一格被以更小的 f 重新入队过）
+				}
+				if (p.equals(to)) {
+					found = true;
+					break;
+				}
+				closed.add(p);
+				expanded++;
+				int d = gScore.getOrDefault(p, Integer.MAX_VALUE);
+				if (d >= maxDepth) {
+					continue;
+				}
+				for (int i = 0; i < 6; i++) {
+					BlockPos n = p.offset(DX[i], DY[i], DZ[i]);
+					if (closed.contains(n)) {
+						continue;
+					}
+					if (!airCell(world, n)) {
+						continue; // 空气才连通；墙 / 关着的门切断体积 ✓（开着的门算通 ✓）
+					}
+					int ng = d + 1;
+					Integer old = gScore.get(n);
+					if (old != null && old <= ng) {
+						continue;
+					}
+					gScore.put(n, ng);
+					parent.put(n, p);
+					fScore.put(n, ng + manhattan(n, tx, ty, tz));
+					open.add(n);
+				}
+			}
+			if (!found) {
+				return AirPath.BLOCKED;
+			}
+			int len = gScore.get(to);
+			java.util.ArrayList<BlockPos> cells = new java.util.ArrayList<>(len + 1);
+			BlockPos c = to;
+			while (c != null) {
+				cells.add(c);
+				if (c.equals(from)) {
+					break;
+				}
+				c = parent.get(c);
+			}
+			java.util.Collections.reverse(cells);
+			return new AirPath(len, countDoorways(world, cells), cells);
+		} catch (Throwable t) {
+			return AirPath.BLOCKED;
+		}
+	}
+
+	/**
+	 * 沿空气路径数"门道/窄颈"的个数。
+	 * <p>判据全部是几何量，<b>不预设房间数量、形状、门在哪</b>：
+	 * <ol>
+	 *   <li>只统计【横向一步】（上下楼梯、翻墙那类竖直移动不算 —— 那正是"墙上方透气"要放行的情形）；</li>
+	 *   <li>垂直于行进方向的水平宽度 ≤ {@link #doorwayMaxWidth()} 格（被门框/墙夹住）；</li>
+	 *   <li>该列头顶净空 ≤ 2 格（门/走廊是 2 格高；露天、天井往上没有上限 ⇒ 不算门）。</li>
+	 * </ol>
+	 * 三条同时满足 ⇒ 这一格是门道。连成一片的窄颈只算 1 道（一个门洞不是十道门）✓
+	 */
+	private static int countDoorways(Level world, java.util.List<BlockPos> path) {
+		int total = 0;
+		int runLen = 0;
+		for (int i = 1; i < path.size(); i++) {
+			BlockPos a = path.get(i - 1);
+			BlockPos b = path.get(i);
+			int dx = b.getX() - a.getX();
+			int dy = b.getY() - a.getY();
+			int dz = b.getZ() - a.getZ();
+			boolean horizontal = dy == 0 && (dx != 0 || dz != 0);
+			boolean narrow = horizontal && isDoorwayCell(world, b, dx, dz);
+			if (narrow) {
+				runLen++;
+			} else if (runLen > 0) {
+				total += portalCountOfRun(runLen);
+				runLen = 0;
+			}
+		}
+		if (runLen > 0) {
+			total += portalCountOfRun(runLen);
+		}
+		return total;
+	}
+
+	/**
+	 * 一段连续的窄颈算几道门。
+	 * <p>短的（1~3 格）= 一个门洞/一个门框 ⇒ 1 道。
+	 * <p>长的（≥4 格）= 一条窄走廊 ⇒ <b>两端各有一个开口</b> ⇒ 2 道。
+	 * 这一条是"客厅 → 1 格宽走廊 → 卧室"能听出两层门道的关键：
+	 * 走廊本身和两端的门一样窄，若只按"窄颈段数"数，会把两端的门并成一道。
+	 */
+	private static int portalCountOfRun(int runLen) {
+		return runLen >= DOORWAY_LONG_RUN ? 2 : 1;
+	}
+
+	/** 这一格算不算"门道"（见 {@link #countDoorways} 的三条判据）。 */
+	private static boolean isDoorwayCell(Level world, BlockPos c, int dx, int dz) {
+		try {
+			if (!airCell(world, c)) {
+				return false;
+			}
+			// 行进方向水平旋转 90° = 门框所在的那条轴
+			int px = -dz;
+			int pz = dx;
+			if (px == 0 && pz == 0) {
+				return false;
+			}
+			int plus = freeRunH(world, c, px, pz);
+			int minus = freeRunH(world, c, -px, -pz);
+			if (plus + minus + 1 > doorwayMaxWidth()) {
+				return false; // 两侧敞着 ⇒ 开阔地 / 墙顶上方 ⇒ 不是门
+			}
+			int head = 0;
+			for (int k = 1; k <= DOORWAY_MAX_HEADROOM + 1; k++) {
+				if (!freeAt(world, c.above(k))) {
+					break;
+				}
+				head++;
+			}
+			return head <= DOORWAY_MAX_HEADROOM;
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	/** 从 c 沿 (dx,dz) 连续自由格数（不含 c 自己），最多探 {@link #DOORWAY_FLANK_SCAN} 格。 */
+	private static int freeRunH(Level world, BlockPos c, int dx, int dz) {
+		int n = 0;
+		for (int k = 1; k <= DOORWAY_FLANK_SCAN; k++) {
+			if (!freeAt(world, c.offset(dx * k, 0, dz * k))) {
+				return n;
+			}
+			n++;
+		}
+		return n;
+	}
+
 	private static Vec3 earOf(Entity self) {
 		return new Vec3(self.getX(), self.getEyeY(), self.getZ());
 	}
@@ -1640,13 +1986,14 @@ public final class Acoustics {
 		Vec3 ear = earOf(self);
 		double dist = ear.distanceTo(centerOf(jukebox));
 		CloudDiscClient.LOGGER.info("[CloudDisc] 物理声效[M7]: source={} EFX={} 遮挡累积={} 主射线遮挡={} 通透通路={}/8 吸收k={} 直通截止(GAINHF)={} 直通增益={} 开阔度={} 距离={}格 水下={} 位置偏移={}格 评估耗时={}ms"
-						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格 路面={}",
+						+ "｜sendGain={} sendCutoff={} 逐层反射率={} 平均反射率={} 自由程={}格 路面={} 门道={}",
 				sourceId,
 				EfxEngine.isAvailable() ? "可用(" + EfxEngine.bands() + "段)" : "不可用→DSP",
 				fmt(st.occlusionAcc), fmt(st.lastOccMain), st.lastOpenPaths, fmt(st.lastK),
 				fmt(st.directCutoff), fmt(st.directGain), fmt(st.openness),
 				fmt1(dist), st.underwater, fmt1(offsetOf(st, jukebox)), fmt3(st.evalNanos / 1.0e6),
-				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath), st.lastPathLenValue);
+				arr(st.sendGain), arr(st.sendCutoff), arr(st.lastBandRefl), fmt(st.lastAvgReflectivity), fmt1(st.lastAvgFreePath), st.lastPathLenValue,
+				st.lastDoorways);
 	}
 
 	private static double offsetOf(State st, BlockPos jukebox) {

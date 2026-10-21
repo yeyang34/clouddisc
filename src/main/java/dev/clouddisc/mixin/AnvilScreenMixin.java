@@ -196,9 +196,12 @@ public abstract class AnvilScreenMixin {
 			CloudDiscConfig cfg = CloudDiscConfig.get();
 			String prefix = cfg == null || cfg.discNamePrefix == null || cfg.discNamePrefix.isBlank()
 					? "@" : cfg.discNamePrefix;
-			NeteasePickerScreen.Pick pick = (id, display, voice) -> {
+			NeteasePickerScreen.Pick pick = (provider, trackId, display) -> {
 				try {
-					String value = prefix + id;
+					// B 站要带前缀（@bili:BV...）；网易云保持 @<数字> 不变 ✓
+					String value = (provider == null || provider.isBlank())
+							? prefix + trackId
+							: prefix + provider + ":" + trackId;
 					// 选歌界面还开着 ⇒ 此刻写会被"返回时的界面重建"冲掉 ✗（实测 ✓）
 					// 所以只记下 ✓ 等回到铁砧、界面重建完成后再落地 ✓（clouddisc$applyPending ✓）
 					clouddisc$pending = value;

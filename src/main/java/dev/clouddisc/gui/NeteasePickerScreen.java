@@ -5,6 +5,9 @@ import com.google.gson.JsonParser;
 import dev.clouddisc.CloudDiscClient;
 import dev.clouddisc.CloudDiscConfig;
 import dev.clouddisc.music.NeteaseSearch;
+import dev.clouddisc.music.BiliSearch;
+import dev.clouddisc.music.Favorites;
+import dev.clouddisc.music.History;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
@@ -40,9 +43,9 @@ import java.util.Map;
  */
 @Environment(EnvType.CLIENT)
 public class NeteasePickerScreen extends Screen {
-	/** 选中后的回调。 */
+	/** 选中后的回调。{@code provider} 为 null 表示"默认音源"（网易云，写 {@code @<id>}）。 */
 	public interface Pick {
-		void onPick(long id, String name, boolean voice);
+		void onPick(String provider, String trackId, String display);
 	}
 
 	// ---------------- 配色（与 CloudDiscConfigScreen 一致） ----------------
@@ -55,7 +58,13 @@ public class NeteasePickerScreen extends Screen {
 	private static final int C_DIM = 0xFF9A9AA8;
 	private static final int C_WARN = 0xFFFFC46B;
 
-	private static final String[] FILTERS = {"全部", "单曲", "声音", "电台"};
+	private static final String[] FILTERS = {"全部", "单曲", "声音", "电台", "收藏", "历史", "B站"};
+	// 前 4 个来自搜索结果；收藏/历史来自本地文件；B站来自解析服务（断网时前 4 个和收藏/历史仍可用）✓
+	private static final int F_FAV = 4;
+	private static final int F_HISTORY = 5;
+	private static final int F_BILI = 6;
+	/** 行首星标列的宽度（点这一列 = 切换收藏，不触发选中）。 */
+	private static final int STAR_W = 11;
 
 	private final Screen parent;
 	private final Pick onPick;
@@ -66,6 +75,8 @@ public class NeteasePickerScreen extends Screen {
 	private Button confirmBtn;
 
 	private List<NeteaseSearch.Item> all = List.of();
+	/** 「B站」页最近一次解析出来的条目（单P 就一条，多P 展开成 P1…Pn）。 */
+	private List<NeteaseSearch.Item> biliResults = List.of();
 	private List<NeteaseSearch.Item> view = List.of();
 	private int selected = -1;
 	private int scroll = 0;
@@ -136,7 +147,7 @@ public class NeteasePickerScreen extends Screen {
 		int by = this.height - 28;
 		confirmBtn = Button.builder(Component.literal("确认"), b -> confirm())
 				.bounds(this.width - 14 - (bw * 2 + 6), by, bw, 20).build();
-		confirmBtn.visible = selected >= 0 && selected < view.size();
+		confirmBtn.visible = selected >= 0 && selected < view.size() && view.get(selected).playable();
 		addRenderableWidget(confirmBtn);
 		addRenderableWidget(Button.builder(Component.literal("取消"), b -> onClose())
 				.bounds(this.width - 14 - bw, by, bw, 20).build());
@@ -147,6 +158,11 @@ public class NeteasePickerScreen extends Screen {
 	private void doSearch() {
 		if (searchBox != null) {
 			keyword = searchBox.getValue();
+		}
+		if (filter == F_BILI) {
+			// B站页的输入框放的是"视频链接/BV 号"，不是搜索词 ⇒ 走解析而不是搜索 ✓
+			doBiliParse(keyword);
+			return;
 		}
 		loading = true;
 		status = "搜索中…";
@@ -184,18 +200,97 @@ public class NeteasePickerScreen extends Screen {
 		});
 	}
 
+	/**
+	 * 解析 B 站链接（B站页的「搜索」按钮 / 回车）。
+	 * <p>把结果填进 {@link #biliResults} 再走本地筛选 —— 和其它页共用同一套列表/选中逻辑 ✓
+	 */
+	private void doBiliParse(String raw) {
+		if (cfg != null && !cfg.biliEnabled) {
+			status = "B 站音源已在配置里关闭（biliEnabled=false）";
+			return;
+		}
+		String text = raw == null ? "" : raw.trim();
+		if (text.isEmpty()) {
+			status = "把 B 站视频链接（或 BV 号）粘到上面的输入框，再点【搜索】";
+			return;
+		}
+		loading = true;
+		status = "解析 B 站链接中…（首次要转码，可能要几秒）";
+		biliResults = List.of();
+		view = List.of();
+		selected = -1;
+		scroll = 0;
+		lyricLines = List.of();
+		lyricScroll = 0;
+		lyricShownFor = -1L;
+		rebuildConfirm();
+		final long mySeq = ++seq;
+		BiliSearch.resolve(cfg, text).thenAccept(r -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc == null) {
+				return;
+			}
+			mc.execute(() -> {
+				if (mySeq != seq) {
+					return;
+				}
+				loading = false;
+				if (r.ok()) {
+					biliResults = r.items();
+					applyFilter(F_BILI);
+					status = biliResults.size() > 1
+							? "共 " + biliResults.size() + " 个分P · 选一个，回车确认"
+							: "解析成功 · 回车确认";
+				} else {
+					biliResults = List.of();
+					view = List.of();
+					selected = -1;
+					status = r.error();
+				}
+				rebuildConfirm();
+			});
+		});
+	}
+
 	private void applyFilter(int f) {
 		filter = Math.max(0, Math.min(FILTERS.length - 1, f));
 		List<NeteaseSearch.Item> v = new ArrayList<>();
-		for (NeteaseSearch.Item it : all) {
-			if (filter == 0) {
-				v.add(it);
-			} else if (filter == 1 && !it.isVoice() && !it.isRadio()) {
-				v.add(it);
-			} else if (filter == 2 && it.isVoice()) {
-				v.add(it);
-			} else if (filter == 3 && it.isRadio()) {
-				v.add(it);
+		if (filter == F_FAV) {
+			// 收藏页：数据来自本地文件，不发任何请求 ✓ 关键词只做本地过滤（方便几百条里找）
+			String kw = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
+			for (NeteaseSearch.Item it : Favorites.all()) {
+				if (kw.isEmpty() || matches(it, kw)) {
+					v.add(it);
+				}
+			}
+		} else if (filter == F_HISTORY) {
+			// 历史页：同样纯本地 ✓ 里面既有自己放的，也有【别人放的】✓
+			String kw = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
+			for (NeteaseSearch.Item it : History.all()) {
+				if (kw.isEmpty() || matches(it, kw)) {
+					v.add(it);
+				}
+			}
+		} else if (filter == F_BILI) {
+			// B站页：内容来自最近一次解析（不是本地收藏，也不是网易云搜索结果）
+			String kw = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
+			for (NeteaseSearch.Item it : biliResults) {
+				if (kw.isEmpty() || kw.startsWith("http") || kw.startsWith("bv") || kw.startsWith("av")
+						|| matches(it, kw)) {
+					v.add(it);
+				}
+			}
+		} else {
+			for (NeteaseSearch.Item it : all) {
+				if (filter == 0) {
+					v.add(it);
+				} else if (filter == 1 && !it.isVoice() && !it.isRadio()) {
+					v.add(it);
+				} else if (filter == 2 && it.isVoice()) {
+					v.add(it);
+				} else if (filter == 3 && it.isRadio()) {
+					v.add(it);
+				}
 			}
 		}
 		view = v;
@@ -210,9 +305,81 @@ public class NeteasePickerScreen extends Screen {
 		rebuildConfirm();
 	}
 
+	/**
+	 * 芯片宽度估算。
+	 * <p>按 {@code label.length() * 6} 算会把中文算窄（中文约 9px）—— 4 个芯片时靠 44 的最小值
+	 * 蒙过去还行，7 个时就会累积错位：<b>看到的标签和点击区对不上，点「B站」可能落到别的筛选</b> ✗
+	 */
+	private static int chipWidth(String label) {
+		int w = 0;
+		for (int i = 0; i < label.length(); i++) {
+			char c = label.charAt(i);
+			w += (c >= 0x2E80) ? 9 : 6;   // CJK 及全角符号
+		}
+		return Math.max(34, w + 12);
+	}
+
+	/** 关键词是否命中这条（名字 / 歌手 / 专辑，大小写不敏感）。 */
+	private static boolean matches(NeteaseSearch.Item it, String kwLower) {
+		return it.name().toLowerCase(Locale.ROOT).contains(kwLower)
+				|| it.artist().toLowerCase(Locale.ROOT).contains(kwLower)
+				|| it.album().toLowerCase(Locale.ROOT).contains(kwLower);
+	}
+
+	/** 每个筛选角上的计数（收藏/历史/B站用已有条数，不去重算整个列表）。 */
+	private int countFor(int i) {
+		if (i == F_FAV) {
+			return Favorites.count();
+		}
+		if (i == F_HISTORY) {
+			return History.count();
+		}
+		if (i == F_BILI) {
+			return biliResults.size();
+		}
+		int n = 0;
+		for (NeteaseSearch.Item it : all) {
+			if (i == 0
+					|| (i == 1 && !it.isVoice() && !it.isRadio())
+					|| (i == 2 && it.isVoice())
+					|| (i == 3 && it.isRadio())) {
+				n++;
+			}
+		}
+		return n;
+	}
+
+	/**
+	 * 切换收藏 + 给一句反馈。
+	 * <p>在「★收藏」页里取消收藏后要立刻从列表里消失，但<b>尽量别把选中项跳走</b>
+	 * （否则连按 F 会误删相邻条目）✓
+	 */
+	private void toggleFav(NeteaseSearch.Item it) {
+		if (it == null) {
+			return;
+		}
+		boolean now = Favorites.toggle(it);
+		status = (now ? "★ 已收藏：" : "已取消收藏：") + it.display();
+		if (!now && filter == F_FAV) {
+			long keepId = it.id();
+			String keepKind = it.kind();
+			int keepIdx = Math.max(0, selected - 1);
+			applyFilter(F_FAV);
+			// 原来选中的那条没了，就把选中落在"它原来位置的前一条"，再按 kind+id 兜一次
+			for (int i = 0; i < view.size(); i++) {
+				if (view.get(i).id() == keepId && java.util.Objects.equals(view.get(i).kind(), keepKind)) {
+					select(i);
+					return;
+				}
+			}
+			select(keepIdx);
+		}
+	}
+
 	private void rebuildConfirm() {
 		if (confirmBtn != null) {
-			confirmBtn.visible = selected >= 0 && selected < view.size();
+			// 没有可用 key 的条目（历史里的本地文件）不能确认：写出来是坏唱片 ✗
+			confirmBtn.visible = selected >= 0 && selected < view.size() && view.get(selected).playable();
 		}
 	}
 
@@ -221,8 +388,16 @@ public class NeteasePickerScreen extends Screen {
 			return;
 		}
 		NeteaseSearch.Item it = view.get(selected);
+		if (!it.playable()) {
+			// 历史里可能有本地文件那种条目（trackId 不是数字也不是 BV 号）—— 写了会得到坏唱片 ✗
+			status = "这条没有可用的 id，不能写进唱片：" + it.rawTrackId();
+			return;
+		}
 		if (onPick != null) {
-			onPick.onPick(it.id(), it.display(), it.isVoice() || it.isRadio());
+			// 【名字格式】B 站写成 {@code @BV1xx411c7mD}（原 BV 号，不带 provider 前缀）——
+			// BV 开头不可能被网易云的"以数字开头"规则命中，天然不冲突 ✓ 而且名字短 ✓
+			// 网易云仍然是 {@code @<数字>}，老唱片完全不受影响 ✓
+			onPick.onPick(null, it.rawTrackId(), it.display());
 		}
 		onClose();
 	}
@@ -402,17 +577,11 @@ public class NeteasePickerScreen extends Screen {
 		// 本地筛选 chips
 		int x = listX;
 		for (int i = 0; i < FILTERS.length; i++) {
-			int count = 0;
-			for (NeteaseSearch.Item it : all) {
-				if (i == 0
-						|| (i == 1 && !it.isVoice() && !it.isRadio())
-						|| (i == 2 && it.isVoice())
-						|| (i == 3 && it.isRadio())) {
-					count++;
-				}
-			}
+			int count = countFor(i);
 			String label = FILTERS[i] + (i == 0 ? "" : " " + count);
-			int cw = Math.max(44, label.length() * 6 + 14);
+			// 7 个筛选要塞进一行 ⇒ 用真实字宽估（中文 9px、英文数字 6px），
+			// 按 length*6 会把中文标签算窄 ⇒ 芯片互相压 + 点击区错位（7 个时就会点错筛选）
+			int cw = chipWidth(label);
 			boolean on = i == filter;
 			context.fill(x, chipsY, x + cw, chipsY + chipsH, on ? C_SEL : C_CARD);
 			context.fill(x, chipsY, x + cw, chipsY + 1, C_CARD_EDGE);
@@ -428,8 +597,22 @@ public class NeteasePickerScreen extends Screen {
 		if (loading) {
 			draw(context, "搜索中…", listX + 6, bodyY + 6);
 		} else if (view.isEmpty()) {
-			draw(context, all.isEmpty() ? "（还没有结果，先在上面搜索）" : "（这个筛选下没有结果）",
-					listX + 6, bodyY + 6);
+			if (filter == F_FAV) {
+				draw(context, Favorites.count() == 0
+						? "（还没有收藏：点行首的 ☆ 或按 F 收藏当前项）"
+						: "（收藏里没有匹配当前关键词的条目）", listX + 6, bodyY + 6);
+			} else if (filter == F_HISTORY) {
+				draw(context, History.count() == 0
+						? "（还没有历史：唱片机真正放响过的歌会出现在这里，别人放的也算）"
+						: "（历史里没有匹配当前关键词的条目）", listX + 6, bodyY + 6);
+			} else if (filter == F_BILI) {
+				draw(context, biliResults.isEmpty()
+						? "（把 B 站视频页链接粘到上面，点【搜索】解析；多P 会列成多行）"
+						: "（这个关键词下没有结果）", listX + 6, bodyY + 6);
+			} else {
+				draw(context, all.isEmpty() ? "（还没有结果，先在上面搜索）" : "（这个筛选下没有结果）",
+						listX + 6, bodyY + 6);
+			}
 		}
 		for (int r = 0; r < visibleRows; r++) {
 			int idx = scroll + r;
@@ -443,19 +626,23 @@ public class NeteasePickerScreen extends Screen {
 				context.fill(listX - 3, y - 1, listX + listW + 3, y + rowH - 2, C_SEL);
 				context.fill(listX - 3, y - 1, listX - 1, y + rowH - 2, C_ACCENT);
 			}
+			// ★ 收藏星标（行首固定列；点这一列 = 切换收藏，不会误选行 ✓）
+			// 没有数字 id 的条目（本地文件那种）不能收藏，画个占位保持列对齐 ✓
+			boolean favOk = it.playable();
+			draw(context, !favOk ? "" : (Favorites.isFav(it) ? "★" : "☆"), listX + 2, y);
 			// 类型标签（固定宽度列 ✓ 排版整齐）
 			String tag = "[" + it.kindLabel() + "]";
-			draw(context, tag, listX + 4, y);
+			draw(context, tag, listX + 2 + STAR_W, y);
 			int tagW = tag.length() * 6 + 6;
 			// 名字 + 歌手
 			String dur = mmss(it.durationMs());
 			int durW = dur.isEmpty() ? 0 : 42;
-			int nameW = listW - tagW - durW - 14;
+			int nameW = listW - STAR_W - tagW - durW - 14;
 			String line = it.name();
 			if (!it.artist().isBlank()) {
 				line = line + "  ·  " + it.artist();
 			}
-			draw(context, fit(line, nameW), listX + 4 + tagW, y);
+			draw(context, fit(line, nameW), listX + 2 + STAR_W + tagW, y);
 			if (!dur.isEmpty()) {
 				drawC(context, dur, listX + listW - 6, y);
 			}
@@ -487,10 +674,13 @@ public class NeteasePickerScreen extends Screen {
 		// 底部操作带
 		context.fill(0, this.height - 40, this.width, this.height, C_BG_BAND);
 		context.fill(0, this.height - 41, this.width, this.height - 40, C_CARD_EDGE);
-		draw(context, "↑↓ 选择 · Enter 确认 · Tab 换筛选 · Esc 取消", listX, this.height - 24);
+		draw(context, "↑↓ 选择 · Enter 确认 · Tab 换筛选 · F / 点☆ 收藏 · Esc 取消", listX, this.height - 24);
 		if (selected >= 0 && selected < view.size()) {
 			NeteaseSearch.Item it = view.get(selected);
-			draw(context, fit("将写入：@" + it.id(), 220), listX, this.height - 13);
+			String target = it.playable()
+					? ("将写入：@" + it.rawTrackId())
+					: "（本地文件，没有 @id，不能写进唱片）";
+			draw(context, fit(target, 260), listX, this.height - 13);
 		}
 		super.extractRenderState(context, mouseX, mouseY, delta);
 	}
@@ -557,6 +747,13 @@ public class NeteasePickerScreen extends Screen {
 					select(view.size() - 1);
 					return true;
 				}
+				if (k == GLFW.GLFW_KEY_F) {
+					// F = 收藏/取消收藏当前项（输入框聚焦时不拦，否则打不出字母 F ✓）
+					if (selected >= 0 && selected < view.size() && view.get(selected).playable()) {
+						toggleFav(view.get(selected));
+						return true;
+					}
+				}
 				if (k == GLFW.GLFW_KEY_TAB) {
 					applyFilter((filter + 1) % FILTERS.length);
 					return true;
@@ -612,7 +809,9 @@ public class NeteasePickerScreen extends Screen {
 					}
 				}
 				String label = FILTERS[i] + (i == 0 ? "" : " " + count);
-				int cw = Math.max(44, label.length() * 6 + 14);
+				// 7 个筛选要塞进一行 ⇒ 用真实字宽估（中文 9px、英文数字 6px），
+			// 按 length*6 会把中文标签算窄 ⇒ 芯片互相压 + 点击区错位（7 个时就会点错筛选）
+			int cw = chipWidth(label);
 				if (mx >= x && mx < x + cw && my >= chipsY && my < chipsY + chipsH) {
 					applyFilter(i);
 					return true;
@@ -624,6 +823,12 @@ public class NeteasePickerScreen extends Screen {
 				int r = (int) ((my - bodyY) / rowH);
 				int idx = scroll + r;
 				if (idx >= 0 && idx < view.size()) {
+					NeteaseSearch.Item it = view.get(idx);
+					if (it.playable() && mx < listX + 2 + STAR_W) {
+						// 点在行首星标上：只切换收藏，不选中、不确认（防止手滑改掉唱片名 ✓）
+						toggleFav(it);
+						return true;
+					}
 					select(idx);
 					if (doubleClick) {
 						confirm();

@@ -162,8 +162,28 @@ public final class TrackFetcher {
 		}
 	}
 
+	/**
+	 * 下载中的临时文件（{@code <hash><ext>.part}）的字节数；没在下载就返回 -1。
+	 *
+	 * <p>用途：给"屏幕下方的状态提示"显示缓冲进度 / 速率。
+	 * <b>只读一个文件大小，不改变下载行为</b> —— 下载主流程一行都不用动 ✓
+	 * （临时文件名是确定的：{@code Integer.toHexString(uri.hashCode()) + guessExtension(uri)}）
+	 */
+	public static long partBytes(String uri, Path cacheDir) {
+		try {
+			if (uri == null || cacheDir == null) {
+				return -1L;
+			}
+			Path p = cacheDir.resolve(Integer.toHexString(uri.hashCode()) + guessExtension(uri) + ".part");
+			return Files.isRegularFile(p) ? Files.size(p) : -1L;
+		} catch (Throwable t) {
+			return -1L;
+		}
+	}
+
 	/** 判断一个 URI 是否可能是本地文件（本地音源 provider 用）。 */
-	public static Path asLocalPath(String uri) {		try {
+	public static Path asLocalPath(String uri) {
+		try {
 			if (uri.startsWith("file:")) {
 				return Path.of(URI.create(uri));
 			}

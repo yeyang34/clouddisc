@@ -1,6 +1,5 @@
 package dev.clouddisc.mixin;
 
-import dev.clouddisc.CloudDiscClient;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.JukeboxSongPlayer;
@@ -44,6 +43,35 @@ public abstract class JukeboxLibMixin {
 	private static long clouddisc$lastProbe = 0L;
 
 	/**
+	 * 【多人模式的根因 · 别再改回 CloudDiscClient.LOGGER】✗
+	 *
+	 * <p>{@code CloudDiscClient} 是<b>客户端类</b>。专用服务端（dedicated server）加载它时
+	 * 会抛 {@code NoClassDefFoundError}，而这个 mixin 的判断逻辑恰好和日志写在同一个 try 里：
+	 * <pre>
+	 * try { ... clouddisc$info(...); return name.startsWith("@"); }
+	 * catch (Throwable ignored) { return false; }
+	 * </pre>
+	 * ⇒ 服务端每张云唱片都被判成"不是我们的碟" ⇒ 按原版时长 stop ⇒
+	 * <b>实测症状正是"单人正常、服务端装了本 mod 之后时长解锁失效"</b> ✗
+	 *
+	 * <p>所以这里自己拿一个 side-neutral 的 logger（只依赖 slf4j，客户端/服务端都有）✓
+	 */
+	@org.spongepowered.asm.mixin.Unique
+	private static org.slf4j.Logger clouddisc$logger;
+
+	@org.spongepowered.asm.mixin.Unique
+	private static void clouddisc$info(String fmt, Object... args) {
+		try {
+			if (clouddisc$logger == null) {
+				clouddisc$logger = org.slf4j.LoggerFactory.getLogger("CloudDisc");
+			}
+			clouddisc$logger.info(fmt, args);
+		} catch (Throwable ignored) {
+			// 日志失败【绝不能】影响判断结果（这正是多人模式那个 bug）
+		}
+	}
+
+	/**
 	 * 【时长解锁 · 正确做法】原版在 tick 里判断"放完了吗"，放完就 stop ✗
 	 * 日志实测：tick 注入在跑 ✓ 但 stop 注入【从未执行】✗ ⇒ 不去猜停止走哪条路 ✗
 	 * 改成【从源头让它永不放完】✓：tick 开头若"已放完"且【是云唱片】⇒ 计数归零 ✓
@@ -67,9 +95,9 @@ public abstract class JukeboxLibMixin {
 				return;
 			}
 			((JukeboxSongPlayerAccessor) self).clouddisc$setTicksSinceSongStarted(0L);
-			CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁: 已到 {} 刻，云唱片计数归零继续播放 ✓", ticks);
+			clouddisc$info("[CloudDisc] 时长解锁: 已到 {} 刻，云唱片计数归零继续播放 ✓", ticks);
 		} catch (Throwable t) {
-			CloudDiscClient.LOGGER.warn("[CloudDisc] 时长解锁归零失败（照常结束）: {}", t.toString());
+			clouddisc$info("[CloudDisc] 时长解锁归零失败（照常结束）: {}", t.toString());
 		}
 	}
 
@@ -80,7 +108,7 @@ public abstract class JukeboxLibMixin {
 			long now = System.currentTimeMillis();
 			if (now - clouddisc$lastProbe > 5000L) {
 				clouddisc$lastProbe = now;
-				CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁·探针: JukeboxSongPlayer.tick 正在跑（mixin 已生效 ✓）");
+				clouddisc$info("[CloudDisc] 时长解锁·探针: JukeboxSongPlayer.tick 正在跑（mixin 已生效 ✓）");
 			}
 		} catch (Throwable ignored) {
 		}
@@ -92,15 +120,15 @@ public abstract class JukeboxLibMixin {
 		try {
 			ours = clouddisc$isOurDisc(level);
 		} catch (Throwable t) {
-			CloudDiscClient.LOGGER.warn("[CloudDisc] 时长解锁判断异常（照常放行原版 stop）: {}", t.toString());
+			clouddisc$info("[CloudDisc] 时长解锁判断异常（照常放行原版 stop）: {}", t.toString());
 		}
 		try {
-			CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁: stop 被调用 是否云唱片={}", ours);
+			clouddisc$info("[CloudDisc] 时长解锁: stop 被调用 是否云唱片={}", ours);
 			if (ours) {
 				ci.cancel();
 			}
 		} catch (Throwable t) {
-			CloudDiscClient.LOGGER.warn("[CloudDisc] 时长解锁拦截失败（照常放行）: {}", t.toString());
+			clouddisc$info("[CloudDisc] 时长解锁拦截失败（照常放行）: {}", t.toString());
 		}
 	}
 
@@ -124,14 +152,16 @@ public abstract class JukeboxLibMixin {
 			if (stack == null || stack.isEmpty()) {
 				stack = jb.getTheItem();
 			}
-			CloudDiscClient.LOGGER.info("[CloudDisc] 时长解锁判断: 唱片名={} 是否云唱片={}",
-					(stack == null ? "空" : stack.getHoverName().getString()),
-					(stack != null && !stack.isEmpty() && stack.getHoverName().getString().startsWith("@")));
 			if (stack == null || stack.isEmpty()) {
+				clouddisc$info("[CloudDisc] 时长解锁判断: 唱片机槽为空 ⇒ 不是云唱片");
 				return false;
 			}
+			// 【顺序很重要】先算出结果、再打日志。日志里出任何岔子都不许改变判断 ——
+			// 之前就是"日志写在 try 里"，服务端一抛异常整个方法就 return false（多人失效的根因）✗
 			String name = stack.getHoverName().getString();
-			return name != null && name.startsWith("@");
+			boolean ours = name != null && name.startsWith("@");
+			clouddisc$info("[CloudDisc] 时长解锁判断: 唱片名={} 是否云唱片={}", name, ours);
+			return ours;
 		} catch (Throwable ignored) {
 			return false;
 		}

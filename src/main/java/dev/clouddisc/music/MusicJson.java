@@ -54,6 +54,13 @@ final class MusicJson {
 				if (body.startsWith("{")) {
 					JsonObject o = JsonParser.parseString(body).getAsJsonObject();
 					String title = o.has("title") ? o.get("title").getAsString() : trackId;
+					// B 站这类音源会额外给一个 author（UP主）：拼成「标题 · UP主」更像"歌名 - 歌手"
+					if (o.has("author")) {
+						String author = o.get("author").getAsString();
+						if (author != null && !author.isBlank()) {
+							title = title + " · " + author;
+						}
+					}
 					String uri = o.has("url") ? o.get("url").getAsString() : url;
 					long dur = o.has("durationMs") ? o.get("durationMs").getAsLong() : -1L;
 					return new MusicProvider.ResolvedTrack(providerId, trackId, title, uri, dur);

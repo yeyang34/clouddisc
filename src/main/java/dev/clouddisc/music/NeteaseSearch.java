@@ -67,7 +67,45 @@ public final class NeteaseSearch {
 
 	/** 一条搜索结果。 */
 	public record Item(String kind, long id, String name, String artist, String album,
-			String cover, long durationMs) {
+			String cover, long durationMs, String trackId) {
+
+		/** 网易云这类"数字 id 就是 key"的音源用这个构造器。 */
+		public Item(String kind, long id, String name, String artist, String album, String cover, long durationMs) {
+			this(kind, id, name, artist, album, cover, durationMs, null);
+		}
+
+		/** 能否写成 {@code @<provider>:<trackId>}（能写才谈得上收藏/确认）。 */
+		public boolean playable() {
+			if (trackId != null && !trackId.isBlank()) {
+				return true;
+			}
+			return id > 0L;
+		}
+
+		/** 写进唱片名的那一段（网易云是数字串，B 站是 {@code BV...} / {@code BV...#p2}）。 */
+		public String rawTrackId() {
+			if (trackId != null && !trackId.isBlank()) {
+				return trackId;
+			}
+			return String.valueOf(id);
+		}
+
+		/**
+		 * 收藏/历史的主键。
+		 * <p>B 站这类 key 是字符串（BV 号），网易云是数字 id —— 统一成一个字符串，
+		 * 免得两套主键逻辑各写一遍、还容易对不上 ✓
+		 */
+		public String key() {
+			if (trackId != null && !trackId.isBlank()) {
+				return kind + ":" + trackId;
+			}
+			return kind + ":" + id;
+		}
+
+		public boolean isBili() {
+			return "bili".equals(kind);
+		}
+
 		public boolean isVoice() {
 			return "voice".equals(kind);
 		}
@@ -78,11 +116,18 @@ public final class NeteaseSearch {
 
 		/** 类型短标签（列表里用）。 */
 		public String kindLabel() {
+			if (isBili()) {
+				return "B站";
+			}
 			if (isRadio()) {
 				return "电台";
 			}
 			if (isVoice()) {
 				return "声音";
+			}
+			if (kind == null || kind.isBlank()) {
+				// 历史记录里只知道 id 与歌名，不知道它原本是单曲/声音/电台
+				return "曲目";
 			}
 			return "单曲";
 		}

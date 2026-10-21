@@ -24,7 +24,7 @@ public final class CloudDiscConfig {
 	 * 新版本把默认值改成 true 之后，老用户仍然读到 false，表现为"功能像没实现"。
 	 * 有了版本号就能在老配置上做一次迁移。
 	 */
-	public static final int CURRENT_VERSION = 5;
+	public static final int CURRENT_VERSION = 9;
 
 	private static CloudDiscConfig instance;
 
@@ -78,9 +78,14 @@ public final class CloudDiscConfig {
 	 * <p>缓存位于<b>每个玩家自己的机器</b>：{@code 游戏目录/config/clouddisc/cache}，**不占服务器硬盘**。
 	 * 超过上限时按"最久未使用"清理到上限的 80% 以下。
 	 */
-	public int cacheMaxMb = 512;
-	/** 单曲允许的最大下载体积（MB），防止被别人的 URL 撑爆内存/磁盘。 */
-	public int maxTrackMb = 64;
+	public int cacheMaxMb = 768;
+	/**
+	 * 单曲允许的最大下载体积（MB），防止被别人的 URL 撑爆内存/磁盘。
+	 * <p>64 → 96 的原因：B 站视频转成 192kbps mp3 后，<b>约 44 分钟就到 64MB</b>，
+	 * 而服务端允许最长 60 分钟的转码（约 86MB）—— 64 会在客户端先被拒掉 ✗
+	 * <p>96MB ≈ 68 分钟 192kbps 音频，正好覆盖服务端那条限制 ✓
+	 */
+	public int maxTrackMb = 96;
 	/**
 	 * 是否禁止使用"别的玩家给过来的私网地址"。
 	 * <p>默认 false：为了"同一局域网里的自建音源（Navidrome/Jellyfin 等）也能被同伴播放"。
@@ -183,8 +188,77 @@ public final class CloudDiscConfig {
 	/** 铁砧界面里显示「网易云选歌」按钮与提示（默认 true ✓） */
 	public boolean anvilAssist = true;
 
-	/** 空气连通就不闷（8 条偏移射线 ≥3 条通透 ⇒ 遮挡压到 0.05）✓ 默认 true */
-	public boolean physicsOpenAirRelax = true;   // 单曲循环：播完自动回到开头   // 单曲循环：做好之前默认关闭（开着会在曲末重开音源，听感像"自己跳回开头"）
+	/**
+	 * 空气连通就不闷（8 条偏移射线 ≥3 条通透 ⇒ 遮挡压到 0.05）✓ 默认 true。
+	 * <p><b>只在 {@link #physicsDoorwayModel} 关闭时生效</b>：开了门道模型后，这条规则会把
+	 * "穿两道门"的闷感又压回 0.05（实测就是"进了没门的内间还是清亮"的元凶）。
+	 */
+	public boolean physicsOpenAirRelax = true;
+
+	/**
+	 * 【门道模型】按"穿过了几道门"决定闷不闷（默认<b>开</b> ✓）。
+	 * <p>对标 Wwise Spatial Audio 的 Rooms &amp; Portals：官方 SDK 里
+	 * {@code AkPropagationPathInfo.gain} 就是"沿途所有传送门的累积增益"，
+	 * {@code uMaxSoundPropagationDepth} 限制"声音最多穿过几个房间"。
+	 * <p>语义（和真人听感对齐）：
+	 * <ul>
+	 *   <li>0 道门（直通、或从墙顶上方绕过去）→ 不闷，保持清亮 ✓</li>
+	 *   <li>1 道门（外面 → 客厅，隔着门道）→ 略暗，但仍是"清亮"档 ✓</li>
+	 *   <li>2 道门（外面 → 客厅 → 卧室）→ 明显暗一档，"有些闷" ✓</li>
+	 *   <li>空气根本不通（封死的房间）→ 不归这条管，走材质遮挡（更闷）✓</li>
+	 * </ul>
+	 * <p>判据只看几何（横向被夹住的窄颈 + 头顶净空矮），<b>不预设房间布局</b>：
+	 * 任何形状的房子都能用，因为门道是从空气路径上现算出来的。
+	 */
+	public boolean physicsDoorwayModel = true;
+
+	/**
+	 * 每多穿一道门，额外增加的遮挡（{@link #physicsDoorwayModel} 开启时生效）。
+	 * <p>0.20 ⇒ 1 道门 0.15、2 道 0.35、3 道 0.55（上限 0.85）。
+	 * <p>想更夸张就调大到 0.3，想更含蓄就调到 0.12。
+	 */
+	public float physicsDoorwayStep = 0.20f;
+	/**
+	 * 多宽算"门道"（默认 2 格）。
+	 * <p>判据是【垂直于行进方向的水平宽度】：
+	 * 1 格 = 原版门；2 格 = 双开门/窄走廊；3 格以上通常已经是房间开口（衰减本来就小）。
+	 * <p>如果你家全是 2~3 格宽的大开口、又想要"进内间变闷"，把它调到 3 或 4 即可
+	 * （代价：很小的房间也会被当成门道，内间会更闷一些，但方向是对的）。
+	 */
+	public int physicsDoorwayMaxWidth = 2;
+
+	/**
+	 * 【B 站音源】允许从视频里取音频当唱片（默认开 ✓）。
+	 * <p>需要一台装了本仓库 {@code _serverside/resolver.py} 的解析服务（带 {@code /bili} 路由，
+	 * 以及服务器上装好 {@code ffmpeg} —— B 站只有 AAC，必须转码成 mp3 才能播）。
+	 * <p>关掉它 = 选歌界面里的「B站」页不出现，铁砧上写 {@code @bili:...} 也会解析失败。
+	 */
+	public boolean biliEnabled = true;
+
+	/**
+	 * 播放时把<b>当前这句网易云歌词</b>打到屏幕下方那行状态栏（默认关）。
+	 * <p>就是"正在播放: xxx"那行的位置 —— 开了之后会变成「♪ 当前歌词」，
+	 * 每换一句才刷新，不影响播放、失败也不影响。
+	 * <p>只对<b>纯数字 id</b>的网易云曲目有效（B 站/本地文件没有歌词接口）。
+	 */
+	public boolean hudLyrics = false;
+
+	/**
+	 * 状态栏歌词的颜色样式（只作用于歌词，其它状态行始终白色）。
+	 * <ul>
+	 *   <li>{@code 0} = 默认白</li>
+	 *   <li>{@code -1} = <b>彩虹渐变</b>（逐字符上色 + 随时间流动）</li>
+	 *   <li>{@code >0} = 固定颜色，值为 {@code 0xRRGGBB}</li>
+	 * </ul>
+	 * 原版没有"彩虹"格式，彩虹是逐字符换色模拟的；配置界面里用一个色板循环来选。
+	 */
+	public int lyricStyle = 0;
+
+	/**
+	 * B 站解析服务的基址（默认<b>留空</b> = 复用 {@link #neteaseEndpoint} 那台服务，换个路由）。
+	 * <p>想单独部署时才填，例如 {@code http://1.2.3.4:8787}。
+	 */
+	public String biliEndpoint = "";
 
 	public boolean enableChatRelay = false;   // 聊天兜底：默认关闭（会刷聊天栏）；同步优先走服务器中继 / UDP
 	/**
@@ -300,6 +374,19 @@ public final class CloudDiscConfig {
 		// v5（0.12.6）新增 physicsAbsorption / physicsOcclusionPaths，且改写了 physicsSoundLevel 的语义。
 		// 两个新字段的 Java 默认值就是想要的默认值（Gson 对缺失字段保留 Java 初始值），所以不需要迁移逻辑；
 		// 只是把文件重写一遍，让新键出现在用户的 clouddisc.json 里，方便手改。
+		// v6（26.2 门道模型）新增 physicsDoorwayModel / physicsDoorwayStep —— 同理，重写一遍让新键现身。
+		// v7（26.2 B 站音源）新增 biliEnabled / biliEndpoint —— 同上。
+		if (configVersion < 8) {
+			// v8：B 站音频（192kbps）44 分钟就到 64MB，会在客户端被误拒 ⇒ 上限抬到 96 / 缓存 768。
+			// 只在这两个值【恰好还是旧默认】时才改，避免覆盖用户自己调过的值 ✓
+			if (maxTrackMb == 64) {
+				maxTrackMb = 96;
+			}
+			if (cacheMaxMb == 512) {
+				cacheMaxMb = 768;
+			}
+		}
+		// v9（26.2 状态栏歌词）新增 hudLyrics / lyricStyle —— 同上，重写一遍让新键现身。
 		configVersion = CURRENT_VERSION;
 	}
 

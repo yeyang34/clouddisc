@@ -32,6 +32,7 @@ public final class Providers {
 		register(netease); // id = "163"
 		registerAlias("netease", netease);
 		registerAlias("wy", netease);
+		register(new BiliProvider()); // id = "bili"
 		register(new DirectUrlProvider());
 	}
 

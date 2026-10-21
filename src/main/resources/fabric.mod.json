@@ -24,8 +24,7 @@
 	},
 	"mixins": [
 		{
-			"config": "clouddisc.mixins.json",
-			"environment": "client"
+			"config": "clouddisc.mixins.json"
 		}
 	],
 	"depends": {

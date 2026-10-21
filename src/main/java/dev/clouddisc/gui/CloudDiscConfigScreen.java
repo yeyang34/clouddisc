@@ -45,7 +45,7 @@ public class CloudDiscConfigScreen extends Screen {
 	private static final int SECTION_COUNT = 5;
 	private static final String[] SECTION_NAMES = {"播放设置", "物理声效", "网络与音源", "使用教程", "更新日志"};
 
-	private static final int ROWS = 9;
+	private static final int ROWS = 10;
 	private static final int ROW_START = 74;
 
 	private static final int LABEL_X_OFFSET = -158;
@@ -165,6 +165,34 @@ public class CloudDiscConfigScreen extends Screen {
 		row(6, "本地音乐目录（⚠重启生效）", textField(6, cfg.localMusicDir, v -> cfg.localMusicDir = v));
 		row(7, "缓存上限 MB（0=不限；只占本机）", cycleInt(7, new int[] { 128, 256, 512, 1024, 2048, 0 },
 				() -> cfg.cacheMaxMb, v -> cfg.cacheMaxMb = v));
+		// 【状态栏歌词】借用"正在播放"那行显示当前这句歌词（只对网易云纯数字 id 有效）
+		row(8, "播放时在状态栏跟唱歌词（只对网易云曲目）",
+				toggle(8, () -> cfg.hudLyrics, v -> cfg.hudLyrics = v));
+		// 歌词颜色：一个循环色板同时覆盖"彩虹渐变"和"固定颜色"两种需求
+		row(9, "歌词颜色（彩虹=逐字符流动）", cycleString(9, LYRIC_STYLES,
+				() -> lyricStyleName(cfg.lyricStyle), v -> cfg.lyricStyle = lyricStyleValue(v)));
+	}
+
+	/** 歌词颜色色板：0 = 白，-1 = 彩虹，其余是固定 RGB。 */
+	private static final String[] LYRIC_STYLES = {"默认白", "彩虹渐变", "青蓝", "橙", "紫", "粉", "绿"};
+	private static final int[] LYRIC_STYLE_VALUES = {0, -1, 0x4C8DFF, 0xFFA640, 0xB98CFF, 0xFF8CC8, 0x66E08A};
+
+	private static String lyricStyleName(int v) {
+		for (int i = 0; i < LYRIC_STYLE_VALUES.length; i++) {
+			if (LYRIC_STYLE_VALUES[i] == v) {
+				return LYRIC_STYLES[i];
+			}
+		}
+		return LYRIC_STYLES[0];
+	}
+
+	private static int lyricStyleValue(String name) {
+		for (int i = 0; i < LYRIC_STYLES.length; i++) {
+			if (LYRIC_STYLES[i].equals(name)) {
+				return LYRIC_STYLE_VALUES[i];
+			}
+		}
+		return 0;
 	}
 
 	// ------------------------------------------------------- 第 2 节：物理声效
@@ -194,8 +222,11 @@ public class CloudDiscConfigScreen extends Screen {
 		row(5, "严格遮挡（开=墙上小缝也算墙）", toggle(5, () -> cfg.physicsStrictOcclusion, v -> cfg.physicsStrictOcclusion = v));
 		row(6, "方向性（声音从拐角绕过来）", toggle(6, () -> cfg.physicsSoundDirection, v -> cfg.physicsSoundDirection = v));
 		row(7, "调试日志 + 材质探针（每轮打印命中方块）", toggle(7, () -> cfg.physicsSoundDebug, v -> cfg.physicsSoundDebug = v));
-		// 第 9 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
-		int y = ROW_START + 8 * layRowStep + Math.max(1, (layRowH - 9) / 2);
+		// 【门道模型】穿几道门就闷几档（0 道门=清亮 / 1 道=略暗 / 2 道=明显闷）。关掉即回到旧行为。
+		row(8, "门道模型（按穿几道门算闷度，Wwise Rooms&Portals）",
+				toggle(8, () -> cfg.physicsDoorwayModel, v -> cfg.physicsDoorwayModel = v));
+		// 第 10 行是只读状态：EFX 到底可不可用（排障第一眼看这个）
+		int y = ROW_START + 9 * layRowStep + Math.max(1, (layRowH - 9) / 2);
 		String efx = dev.clouddisc.audio.EfxEngine.isAvailable()
 				? "EFX 可用（" + dev.clouddisc.audio.EfxEngine.bands() + " 段混响）"
 				: "EFX 不可用 → 已回退自研 DSP：" + dev.clouddisc.audio.EfxEngine.status();

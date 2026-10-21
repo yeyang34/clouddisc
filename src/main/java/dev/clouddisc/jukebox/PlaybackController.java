@@ -423,9 +423,20 @@ public final class PlaybackController {
 			if (s.state == JukeboxSession.State.SCHEDULED) {
 				if (nowTick >= s.localStartTick) {
 					beginPlayback(s);
+				} else if (nowTick % 10L == 0L) {
+					// 已经排好"统一起始刻"，这段倒计时是【真的】：直接由刻数换算，不是估的 ✓
+					String nm = s.title == null || s.title.isBlank() ? s.trackId : trimForHud(s.title);
+					dev.clouddisc.gui.HudStatus.show(String.format(java.util.Locale.ROOT,
+							"☁ %s · 即将开始 %.1f 秒", nm, Math.max(0.0, (s.localStartTick - nowTick) / 20.0)));
 				}
 			} else if (s.state == JukeboxSession.State.PLAYING) {
 				tickPlaying(s, nowTick);
+			} else if (s.state == JukeboxSession.State.PREPARING || s.state == JukeboxSession.State.RESOLVING) {
+				// 播放前的那几秒别让玩家干等：借屏幕上那行"正在播放"显示进度 ✓
+				// 每 10 刻（0.5 秒）刷一次就够，写太勤没意义还可能抢帧
+				if (nowTick % 10L == 0L) {
+					hudPrepare(s);
+				}
 			}
 		}
 	}
@@ -455,6 +466,12 @@ public final class PlaybackController {
 		AudioPipeline pipe = s.pipeline;
 		if (pipe == null) {
 			return;
+		}
+		// 【状态栏歌词】必须放在**最前面**：
+		// 下面"真实结尾"那段在单曲循环时会 `return`（第一遍之后每刻都命中），
+		// 之前把钩子放在它后面 ⇒ 第二遍起一次都不执行 ⇒ 表现为"后面几遍没歌词" ✗
+		if (cfg.hudLyrics && nowTick % 5L == 0L) {
+			hudLyricTick(s, nowTick, cfg.loopSingle, cfg.lyricStyle);
 		}
 		// 诊断：起播 1 秒 / 5 秒后各打一次"声音引擎到底有没有把我们的音频取走"。
 		// 这是判断"真的没声音"最直接的一行：playedMs 一直是 0 = MC 根本没在消费
@@ -586,10 +603,17 @@ public final class PlaybackController {
 	private void startSession(JukeboxSession s, long nowTick) {
 		MusicProvider provider;
 		if (s.provider == null || s.provider.isBlank()) {
-			// 没写 provider：明显是网易云链接就自动交给 163，否则用默认 provider
-			provider = dev.clouddisc.music.NeteaseLinkProvider.looksLikeNetease(s.trackId)
-					? Providers.byId("163")
-					: Providers.defaultProvider(cfg);
+			// 没写 provider：按 trackId 的样子自动认。
+			// 【顺序很重要】B 站（BV 开头）必须在网易云之前判 ——
+			// 网易云那条是"以数字开头即歌曲 id"，虽然 BV 不会被它命中，
+			// 但把更"具体"的规则放前面能避免以后再踩同类坑 ✓
+			if (dev.clouddisc.music.BiliProvider.looksLikeBili(s.trackId)) {
+				provider = Providers.byId("bili");
+			} else if (dev.clouddisc.music.NeteaseLinkProvider.looksLikeNetease(s.trackId)) {
+				provider = Providers.byId("163");
+			} else {
+				provider = Providers.defaultProvider(cfg);
+			}
 		} else {
 			provider = Providers.byId(s.provider);
 		}
@@ -598,6 +622,8 @@ public final class PlaybackController {
 			return;
 		}
 		CloudDiscClient.LOGGER.info("[CloudDisc] 开始解析曲目: provider={} trackId={}", provider.id(), s.trackId);
+		// 播放前的第一句：让玩家知道"唱片机已经接单了"（随后被 hudPrepare 的进度覆盖）
+		dev.clouddisc.gui.HudStatus.show("☁ " + (s.title == null || s.title.isBlank() ? s.trackId : s.title) + " · 正在解析…");
 		provider.resolve(s.trackId, cfg).whenComplete((track, err) ->
 				Minecraft.getInstance().execute(() -> {
 					if (err != null || track == null) {
@@ -695,6 +721,164 @@ public final class PlaybackController {
 				announcer.announcePlay(s, now());
 			}
 		}));
+	}
+
+	/**
+	 * 播放前的状态提示（借用屏幕上那行「正在播放」）。
+	 *
+	 * <p>为什么要做：解析 + 转码 + 下载 + 预缓冲这段时间，玩家听到的是<b>静默</b>，
+	 * 但唱片机其实在干活。不说清楚，玩家会以为"按了没反应"。
+	 *
+	 * <p>信息只给<b>真实能拿到的东西</b>：
+	 * <ul>
+	 *   <li>已在下载 ⇒ 已收字节数 + 实测速率（读 {@code .part} 文件大小，不猜）</li>
+	 *   <li>B 站且一个字节都还没到 ⇒ 明说"服务器转码中"（这段等待客户端确实看不到任何数据）</li>
+	 *   <li>其它 ⇒ 只写"准备中…"，<b>不编一个假的百分比/秒数</b></li>
+	 * </ul>
+	 */
+	private static void hudPrepare(JukeboxSession s) {
+		try {
+			String name = s.title == null || s.title.isBlank() ? s.trackId : trimForHud(s.title);
+			String head = "☁ " + name + " · ";
+			long got = -1L;
+			try {
+				CloudDiscConfig c = CloudDiscClient.config();
+				if (c != null && s.uri != null && !s.uri.isBlank()) {
+					got = TrackFetcher.partBytes(s.uri, c.resolveCacheDir());
+				}
+			} catch (Throwable ignored) {
+				// 拿不到进度就当没有
+			}
+			String text;
+			if (got > 0L) {
+				long nowMs = System.currentTimeMillis();
+				String speed = "";
+				if (s.hudSampleMs > 0L && nowMs > s.hudSampleMs) {
+					double dt = (nowMs - s.hudSampleMs) / 1000.0;
+					long db = got - s.hudSampleBytes;
+					if (dt > 0.2 && db > 0) {
+						speed = String.format(java.util.Locale.ROOT, " · %.0f KB/s", db / 1024.0 / dt);
+					}
+				}
+				s.hudSampleMs = nowMs;
+				s.hudSampleBytes = got;
+				text = head + String.format(java.util.Locale.ROOT, "缓冲中 %.1f MB", got / 1048576.0) + speed;
+			} else if (biliLike(s)) {
+				// 这段是"服务器在转码"，客户端一个字节都收不到 ⇒ 必须说出来
+				text = head + "服务器转码中…（首次约 5~10 秒）";
+			} else {
+				text = head + "准备中…";
+			}
+			dev.clouddisc.gui.HudStatus.show(text);
+		} catch (Throwable ignored) {
+			// 提示失败不影响播放
+		}
+	}
+
+	/** 这次会话是不是 B 站音源（显式写了 provider，或唱片名本身就是 BV 号）。 */
+	private static boolean biliLike(JukeboxSession s) {
+		return "bili".equalsIgnoreCase(s.provider) || dev.clouddisc.music.BiliProvider.looksLikeBili(s.trackId);
+	}
+
+	/**
+	 * 【状态栏歌词】把当前这句打到屏幕下方。
+	 *
+	 * <p>只在**换句**时重写；同一句期间每 10 刻续一次（那行本身是带倒计时的，不续会自己消失）。
+	 * 拿不到歌词就直接返回，让原本的「正在播放: 曲名」继续留着 —— 绝不显示占位噪音 ✓
+	 */
+	private static void hudLyricTick(JukeboxSession s, long nowTick, boolean loop, int style) {
+		try {
+			if (s.startedTick <= 0L) {
+				return;
+			}
+			long id = numericId(s.trackId);
+			if (id <= 0L) {
+				return; // 只有网易云（纯数字 id）才有歌词；B站/本地文件没有
+			}
+			java.util.List<dev.clouddisc.music.Lyrics.Line> lines = dev.clouddisc.music.Lyrics.cachedOrFetch(id);
+			if (lines == null || lines.isEmpty()) {
+				return;
+			}
+			long posRaw = s.msAtStart + (nowTick - s.startedTick) * 50L;
+			long pos = posRaw;
+			long dur = 0L;
+			if (loop) {
+				// 【单曲循环必须取模】循环是解码管线在内部回到 0 的，
+				// startedTick / msAtStart 并不会重置 ⇒ 不取模的话 pos 会一路涨过曲长，
+				// 二分永远命中最后一句 ⇒ 表现就是"第一遍正常、第二遍定住" ✗
+				dur = loopLengthOf(s);
+				if (dur > 0L) {
+					pos = Math.floorMod(posRaw, dur);
+				}
+			}
+			String text = dev.clouddisc.music.Lyrics.lineAt(lines, pos);
+			// 排障用：开着 physicsSoundDebug 时每 5 秒打一条，出了问题一眼能看出是"位置算错"还是"查不到句"
+			try {
+				CloudDiscConfig dbgCfg = CloudDiscClient.config();
+				if (dbgCfg != null && dbgCfg.physicsSoundDebug && nowTick % 100L == 0L) {
+					CloudDiscClient.LOGGER.info("[CloudDisc] 歌词: 原始位置={}ms 取模后={}ms 循环长度={}ms 句数={} 显示={}",
+							posRaw, pos, dur, lines.size(), text == null ? "(空)" : text);
+				}
+			} catch (Throwable ignored) {
+			}
+			if (text == null || text.isBlank()) {
+				return;
+			}
+			boolean changed = !text.equals(s.hudLyricText);
+			s.hudLyricText = text;
+			// 彩虹是【流动】的：同一句也要不断重写上色，否则会定格成一个静态渐变
+			boolean animate = style == -1;
+			if (changed || animate || nowTick % 10L == 0L) {
+				dev.clouddisc.gui.HudStatus.showStyled("♪ " + text, style);
+			}
+		} catch (Throwable ignored) {
+			// 歌词失败不影响播放
+		}
+	}
+
+	/**
+	 * 循环长度（毫秒）。
+	 * <p>优先用<b>管线自己的</b>时长：循环点是文件真结尾，用接口报的时长会
+	 * 每循环一次偏一点点（实测 225000 vs 224280 ⇒ 每遍晚 0.7 秒，几遍下来就对不上了）。
+	 */
+	private static long loopLengthOf(JukeboxSession s) {
+		long hint = Math.max(0L, s.durationMs);
+		long fromPipe = 0L;
+		try {
+			if (s.pipeline != null) {
+				fromPipe = s.pipeline.durationMs();
+			}
+		} catch (Throwable ignored) {
+			// 取不到就只用接口值
+		}
+		// 管线时长最贴近"真正循环的那一点"，但如果它明显离谱（解码器只解出一小段、
+		// 或者流式解码给不出时长时返回了怪值），就不能用它 —— 否则取模会每几百毫秒绕一圈，
+		// 歌词会疯跳。判据：与接口报的时长相差不超过 max(3 秒, 20%)。
+		if (fromPipe > 0L && (hint <= 0L || Math.abs(fromPipe - hint) <= Math.max(3000L, hint / 5))) {
+			return fromPipe;
+		}
+		return hint > 0L ? hint : fromPipe;
+	}
+
+	/** trackId 是纯数字就返回它，否则 0。 */
+	private static long numericId(String trackId) {
+		if (trackId == null) {
+			return 0L;
+		}
+		String t = trackId.trim();
+		if (t.isEmpty() || t.length() > 12) {
+			return 0L;
+		}
+		for (int i = 0; i < t.length(); i++) {
+			if (!Character.isDigit(t.charAt(i))) {
+				return 0L;
+			}
+		}
+		try {
+			return Long.parseLong(t);
+		} catch (NumberFormatException e) {
+			return 0L;
+		}
 	}
 
 	/** 起播位置的安全上限：超过这个值说明定位算错了，宁可不放也别静悄悄地放个寂寞。 */
@@ -854,12 +1038,24 @@ public final class PlaybackController {
 		}
 		Minecraft.getInstance().getSoundManager().play(instance);
 		s.state = JukeboxSession.State.PLAYING;
-		// 还原原版行为：屏幕下方显示「正在播放: xxx」（26.2 里是 Minecraft.gui.setNowPlaying(Component) ✓）
+		// 【历史记录】打点在"真正开声"这一刻：本机发起和别人放的都是同一处 ✓
+		// 只记一次（seek/重连会再走到这里）；解析失败/没音频的从来走不到这一句，所以不会脏 ✓
+		if (!s.historyLogged) {
+			s.historyLogged = true;
+			try {
+				dev.clouddisc.music.History.record(s.provider, s.trackId, s.title, s.durationMs, s.originator);
+			} catch (Throwable ignored) {
+				// 历史记录是便利功能，绝不能影响播放
+			}
+		}
 		// 【26.2】告诉解码管线：这张碟要不要单曲循环（管线内部循环 ✗ 不让流到 EOF ✓）
 				if (pipe != null) { pipe.setLoopForever(cfg.loopSingle); }
 
-		Minecraft.getInstance().gui.hud.setNowPlaying(
-				Component.literal(trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title)));
+		// 屏幕下方显示曲名：**走动作栏**，不用原版的 setNowPlaying ——
+		// 那个位置带「正在播放: 」前缀（翻译键 record.nowPlaying 是原版渲染的，我们改不掉），
+		// 改成自己的文本才能和"解析中 / 转码中 / 歌词"这些状态统一，也不会自相矛盾 ✓
+		dev.clouddisc.gui.HudStatus.show(
+				"♪ " + trimForHud(s.title == null || s.title.isBlank() ? s.trackId : s.title));
 		// 同时打出"请求位置 / 实际位置"：这两个数不一致就说明 seek 没生效（排查这类问题的关键一行）
 		CloudDiscClient.LOGGER.info("[CloudDisc] 已开始播放: {}（请求位置 {}ms / 实际 {}ms）｜流 id={}｜预缓冲 {}ms",
 				s.title, positionMs, pipe.playedMs(), streamId, pipe.ring().available() / AudioPipeline.BYTES_PER_MS);
